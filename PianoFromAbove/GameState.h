@@ -14,10 +14,7 @@
 #include <string>
 using namespace std;
 
-#include <boost\circular_buffer.hpp>
-using namespace boost;
 
-#include "ProtoBuf\MetaData.pb.h"
 #include "Renderer.h"
 #include "MIDI.h"
 #include "Misc.h"
@@ -27,8 +24,7 @@ class GameState
 {
 public:
     enum GameError { Success = 0, BadPointer, OutOfMemory, DirectXError, NoInputDevice, BadInputDevice };
-    enum State { Intro = 0, Splash, Practice = 160, Play, Learn };
-    enum LearnMode { Adaptive, Waiting };
+    enum State { Intro = 0, Splash, Practice = 160 };
 
     //Static methods
     static const wstring Errors[];
@@ -70,11 +66,11 @@ protected:
 
 struct ChannelSettings
 {
-    ChannelSettings() { bHidden = bMuted = bScored = false; SetColor( 0x00000000 ); }
+    ChannelSettings() { bHidden = bMuted = false; SetColor( 0x00000000 ); }
     void SetColor();
     void SetColor( unsigned int iColor, double dDark = 0.5, double dVeryDark = 0.2 );
 
-    bool bHidden, bMuted, bScored;
+    bool bHidden, bMuted;
     unsigned int iPrimaryRGB, iDarkRGB, iVeryDarkRGB, iOrigBGR;
 };
 struct TrackSettings { ChannelSettings aChannels[16]; };
@@ -93,7 +89,7 @@ private:
     void InitNotes( const vector< MIDIEvent* > &vEvents );
     void InitState();
     void ColorChannel( int iTrack, int iChannel, unsigned int iColor, bool bRandom = false );
-    void SetChannelSettings( const vector< bool > &vScored, const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor );
+    void SetChannelSettings( const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor );
 
     void UpdateState( int iPos );
 
@@ -137,52 +133,6 @@ public:
     GameError Init();
     GameError Logic();
     GameError Render();
-};
-
-class GameScore
-{
-public:
-    static const long long OkTime = 250000;
-    static const long long GoodTime = 150000;
-    static const long long GreatTime = 50000;
-
-    static const int MissedScore = -50;
-    static const int IncorrectScore = -50;
-    static const int OkScore = 50;
-    static const int GoodScore = 100;
-    static const int GreatScore = 300;
-
-    static const wchar_t *MissedText;
-    static const wchar_t *IncorrectText;
-    static const wchar_t *OkText;
-    static const wchar_t *GoodText;
-    static const wchar_t *GreatText;
-
-    static const unsigned MissedColor = 0xFFED1C24;
-    static const unsigned IncorrectColor = 0xFFED1C24;
-    static const unsigned OkColor = 0xFF3F48CC;
-    static const unsigned GoodColor = 0xFF22B14C;
-    static const unsigned GreatColor = 0xFFFFFF00;
-
-    GameScore() { Reset(); }
-    void Reset() { m_Score.Clear(); }
-
-    void Missed();
-    void Incorrect();
-    void Hit( MIDIChannelEvent::InputQuality eHitQuality );
-    MIDIChannelEvent::InputQuality HitQuality( long long llError, double dSpeed );
-    int AddToTop10 ( PFAData::FileInfo *pFileInfo );
-
-    int GetScore() const { return m_Score.score(); }
-    int GetMult() const { return m_Score.mult(); }
-    
-    int GetMissed() const { return m_Score.missed(); }
-    int GetOk() const { return m_Score.ok(); }
-    int GetGood() const { return m_Score.good(); }
-    int GetGreat() const { return m_Score.great(); }
-
-private:
-    PFAData::Score m_Score;
 };
 
 class TextPath
@@ -232,12 +182,11 @@ public:
                                                   !m_vTrackSettings[iTrack].aChannels[iChannel].bMuted; }
     void ToggleHidden( int iTrack, int iChannel ) { m_vTrackSettings[iTrack].aChannels[iChannel].bHidden =
                                                    !m_vTrackSettings[iTrack].aChannels[iChannel].bHidden; }
-    void ScoreChannel( int iTrack, int iChannel, bool bScored ) { m_vTrackSettings[iTrack].aChannels[iChannel].bScored = bScored; m_bScored |= bScored; }
     void MuteChannel( int iTrack, int iChannel, bool bMuted ) { m_vTrackSettings[iTrack].aChannels[iChannel].bMuted = bMuted; }
     void HideChannel( int iTrack, int iChannel, bool bHidden ) { m_vTrackSettings[iTrack].aChannels[iChannel].bHidden = bHidden; }
     void ColorChannel( int iTrack, int iChannel, unsigned int iColor, bool bRandom = false );
     ChannelSettings* GetChannelSettings( int iChannel );
-    void SetChannelSettings( const vector< bool > &vScored, const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor );
+    void SetChannelSettings( const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor );
 
 private:
     typedef vector< pair< long long, int > > eventvec_t;
@@ -247,23 +196,15 @@ private:
     void InitColors();
     void InitLabels();
     void InitState();
-    void InitLearning( bool bResetMinTime = true );
 
     // Logic
     void UpdateState( int iPos );
     void PlayMetronome( double dVolumeCorrect );
-    void ProcessInput();
     void JumpTo( long long llStartTime, bool bUpdateGUI = true, bool bInitLearning = true );
-    void FindInputPos();
     void PlaySkippedEvents( eventvec_t::const_iterator itOldProgramChange );
     void AdvanceIterators( long long llTime, bool bIsJump );
     MIDIMetaEvent* GetPrevious( eventvec_t::const_iterator &itCurrent,
                                 const eventvec_t &vEventMap, int iDataLen );
-
-    // Learning
-    void NextTrack();
-    bool DoWaiting( long long llNextStartTime, long long llElapsed );
-    bool DoTransition( long long llElapsed, long long llOldStartTime );
 
     // MIDI helpers
     int GetCurrentTick( long long llStartTime );
@@ -281,8 +222,6 @@ private:
     void RenderLines();
     void RenderNotes();
     void RenderNote( int iPos );
-    void RenderLabels();
-    bool RenderLabel( int iPos, bool bSetState );
     float GetNoteX( int iNote );
     void RenderKeys();
     void RenderBorder();
@@ -310,41 +249,21 @@ private:
     // Playback
     State m_eGameMode;
     int m_iStartPos, m_iEndPos; // Postions of the start and end events that occur in the current window
-    int m_iStartInputPos, m_iEndInputPos; // Defines the input range for hitting a note
     long long m_llStartTime, m_llTimeSpan;  // Times of the start and end events of the current window
     int m_iStartTick; // Tick that corresponds with m_llStartTime. Used to help with beat and metronome detection
     vector< int > m_vState;  // The notes that are on at time m_llStartTime.
     int m_pNoteState[128]; // The last note that was turned on
-    int m_pInputState[128]; // The input state
     double m_dSpeed; // Speed multiplier
     bool m_bPaused; // Paused state
     Timer m_Timer; // Frame timers
     bool m_bMute;
     double m_dVolume;
-    long long m_llEndLoop;
-
-    // Learning
-    static const long long TestTime = 7500000;
-    static const int FlashTime = 500000;
-    static const int TransitionTime = 2000000;
-    static const int TransitionPct = 20;
-    LearnMode m_eLearnMode;
-    bool m_bInTransition, m_bForceWait;
-    int m_iLearnOrdinal, m_iLearnTrack, m_iLearnChannel, m_iLearnPos;
-    int m_iNotesAlpha, m_iNotesTime, m_iWaitingAlpha, m_iWaitingTime;
-    int m_iGoodCount;
-    circular_buffer< pair< int, int > > m_cbLastNotes;
-    long long m_llTransitionTime, m_llMinTime;
 
     // Scoring and notifications
-    GameScore m_Score;
     wchar_t m_sBuf[128];
-    TextPath m_tpMessage, m_tpLongMessage;
-    TextPath m_tpParticles[128];
-    PFAData::FileInfo *m_pFileInfo;
+    TextPath m_tpMessage;
 
     // Labeling
-    int m_iHotNote, m_iNextHotNote, m_iSelectedNote;
     bool m_bHaveMouse;
     
     // FPS variables
@@ -355,7 +274,6 @@ private:
 
     // Devices
     MIDIOutDevice m_OutDevice;
-    MIDIInDevice m_InDevice;
 
     // Metronome
     static const int HiWoodBlock = 76;
@@ -365,11 +283,10 @@ private:
     // Visual
     static const float SharpRatio;
     static const float KeyRatio;
-    bool m_bShowKB, m_bNoteLabels, m_bScored, m_bInstructions;
-    int m_iShowTop10;
+    bool m_bShowKB;
     int m_eKeysShown;
     ChannelSettings m_csBackground;
-    ChannelSettings m_csKBRed, m_csKBWhite, m_csKBSharp, m_csKBBackground, m_csKBBadNote;
+    ChannelSettings m_csKBRed, m_csKBWhite, m_csKBSharp, m_csKBBackground;
     vector< TrackSettings > m_vTrackSettings;
 
     float m_fZoomX, m_fOffsetX, m_fOffsetY;

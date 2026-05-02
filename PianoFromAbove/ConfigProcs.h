@@ -22,9 +22,6 @@ VOID Changed( HWND hWnd );
 INT_PTR WINAPI VisualProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam );
 VOID SetVisualProc( HWND hWnd, const VisualSettings &cVisual );
 
-INT_PTR WINAPI NoteSpanProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam );
-void MIDIInProc( unsigned char cStatus, unsigned char cParam1, unsigned char cParam2, int iMilliSecs, void *pUserData );
-
 INT_PTR WINAPI AudioProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam );
 VOID SetAudioProc( HWND hWnd, const AudioSettings &cAudio );
 

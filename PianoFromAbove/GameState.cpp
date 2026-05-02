@@ -10,6 +10,8 @@
 *************************************************************************************************/
 #include <tchar.h>
 
+#include <algorithm>
+
 #include "Globals.h"
 #include "GameState.h"
 #include "Config.h"
@@ -156,7 +158,7 @@ void SplashScreen::InitState()
     m_bPaused = cPlayback.GetPaused();
     m_bMute = cPlayback.GetMute();
 
-    SetChannelSettings( vector< bool >(), vector< bool >(), vector< bool >(),
+    SetChannelSettings( vector< bool >(), vector< bool >(),
         vector< unsigned >( cVisual.colors, cVisual.colors + sizeof( cVisual.colors ) / sizeof( cVisual.colors[0] ) ) );
 
     if ( cAudio.iOutDevice >= 0 )
@@ -177,12 +179,11 @@ void SplashScreen::ColorChannel( int iTrack, int iChannel, unsigned int iColor, 
         m_vTrackSettings[iTrack].aChannels[iChannel].SetColor( iColor );
 }
 
-void SplashScreen::SetChannelSettings( const vector< bool > &vScored, const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor )
+void SplashScreen::SetChannelSettings( const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor )
 {
     const MIDI::MIDIInfo &mInfo = m_MIDI.GetInfo();
     const vector< MIDITrack* > &vTracks = m_MIDI.GetTracks();
 
-    bool bScored = vScored.size() > 0;
     bool bMuted = vMuted.size() > 0;
     bool bHidden = vHidden.size() > 0;
     bool bColor = vColor.size() > 0;
@@ -500,7 +501,7 @@ float SplashScreen::GetNoteX( int iNote )
 //-----------------------------------------------------------------------------
 
 MainScreen::MainScreen( wstring sMIDIFile, State eGameMode, HWND hWnd, Renderer *pRenderer ) :
-    GameState( hWnd, pRenderer ), m_MIDI( sMIDIFile ), m_eGameMode( eGameMode ), m_cbLastNotes( 500 )
+    GameState( hWnd, pRenderer ), m_MIDI( sMIDIFile ), m_eGameMode( eGameMode )
 {
     // Finish off midi processing
     if ( !m_MIDI.IsValid() ) return;
@@ -518,7 +519,6 @@ MainScreen::MainScreen( wstring sMIDIFile, State eGameMode, HWND hWnd, Renderer 
     InitColors();
     InitLabels();
     InitState();
-    InitLearning();
 }
 
 void MainScreen::InitNoteMap( const vector< MIDIEvent* > &vEvents )
@@ -565,25 +565,11 @@ void MainScreen::InitColors()
     m_csKBRed.SetColor( 0x000D0A98, 0.5f );
     m_csKBWhite.SetColor( 0x00FFFFFF, 0.8f, 0.6f );
     m_csKBSharp.SetColor( 0x00404040, 0.5f, 0.0f );
-    m_csKBBadNote.SetColor( 0x00808080 );
 }
 
 void MainScreen::InitLabels()
 {
-    // Scoring notifications
-    vector< TextPath::TextPathVertex > vPath;
-    TextPath::TextPathVertex v1 = { 0.0f, -23.0f, 0.0f, 0xFF }; vPath.push_back( v1 );
-    TextPath::TextPathVertex v2 = { 0.0f, -26.0f, 0.05f, 0xFF }; vPath.push_back( v2 );
-    TextPath::TextPathVertex v3 = { 0.0f, -23.0f, 0.1f, 0xFF }; vPath.push_back( v3 );
-    TextPath::TextPathVertex v4 = { 0.0f, -23.0f, 0.4f, 0xFF }; vPath.push_back( v4 );
-    TextPath::TextPathVertex v5 = { 0.0f, 0.0f, 0.5f, 0xFF }; vPath.push_back( v5 );
-    for ( int i = 0; i < 128; i++ )
-    {
-        m_tpParticles[i].SetPath( vPath );
-        m_tpParticles[i].SetFont( Renderer::SmallComic );
-        m_tpParticles[i].Reset( 0.0f, 0.0f, 0, NULL );
-        m_tpParticles[i].Kill();
-    }
+	vector< TextPath::TextPathVertex > vPath;
 
     // Generic message
     vPath.clear();
@@ -593,24 +579,6 @@ void MainScreen::InitLabels()
     m_tpMessage.SetPath( vPath );
     m_tpMessage.SetFont( Renderer::Large );
     m_tpMessage.Kill();
-
-    vPath.clear();
-    TextPath::TextPathVertex v9 = { 0.0f, 0.0f, 0.0f, 0xFF }; vPath.push_back( v9 );
-    TextPath::TextPathVertex v10 = { 0.0f, 0.0f, TransitionTime * 1.5f / 1000000.0f, 0xFF }; vPath.push_back( v10 );
-    TextPath::TextPathVertex v11 = { 0.0f, 0.0f, TransitionTime * 1.5f / 1000000.0f + 0.1f, 0x00 }; vPath.push_back( v11 );
-    m_tpLongMessage.SetPath( vPath );
-    m_tpLongMessage.SetFont( Renderer::Large );
-    m_tpLongMessage.Kill();
-
-    // Note labels
-    static Config &config = Config::GetConfig();
-    static SongLibrary &cLibrary = config.GetSongLibrary();
-
-    m_pFileInfo = cLibrary.GetInfo( cLibrary.AddFile( m_MIDI.GetInfo().sFilename, &m_MIDI )->infopos() );
-    if ( !m_pFileInfo ) return;
-
-    for ( int i = 0; i < m_pFileInfo->label_size(); i++ )
-        m_vEvents[ m_pFileInfo->label( i ).pos() ]->SetLabelPtr( m_pFileInfo->mutable_label( i )->mutable_label() );
 }
 
 // Init state vars. Only those which validate the date.
@@ -621,10 +589,10 @@ void MainScreen::InitState()
     static const ViewSettings &cView = config.GetViewSettings();
     static const VisualSettings &cVisual = config.GetVisualSettings();
 
-    if ( m_eGameMode != Practice && m_eGameMode != Play && m_eGameMode != Learn )
+    if ( m_eGameMode != Practice )
         m_eGameMode = Practice;
-    m_iStartPos = m_iStartInputPos = m_iLearnPos = 0;
-    m_iEndPos = m_iEndInputPos = -1;
+    m_iStartPos = 0;
+    m_iEndPos = -1;
     m_llStartTime = GetMinTime();
     m_iLastMetronomeNote = HiWoodBlock;
     m_bTrackPos = m_bTrackZoom = false;
@@ -634,47 +602,19 @@ void MainScreen::InitState()
     m_iFPSCount = 0;
     m_llFPSTime = 0;
     m_dSpeed = -1.0; // Forces a speed reset upon first call to Logic
-    m_iNextHotNote = m_iSelectedNote = -1;
     m_bHaveMouse = false;
-    m_iShowTop10 = -1;
-    m_bScored = false;
-    m_bInstructions = ( m_eGameMode != Practice );
-    m_iNotesAlpha = 0;
-    m_llTransitionTime = GetMinTime() - 1;
-    m_llEndLoop = m_llTransitionTime - 1;
-
-    m_eLearnMode = cPlayback.GetLearnMode();
-    m_iLearnTrack = 0;
-    m_iLearnOrdinal = m_iLearnChannel = -1;
 
     m_fZoomX = cView.GetZoomX();
     m_fOffsetX = cView.GetOffsetX();
     m_fOffsetY = cView.GetOffsetY();
-    m_bPaused = m_bInstructions;
+    m_bPaused = false;
     m_bMute = cPlayback.GetMute();
     double dNSpeed = cPlayback.GetNSpeed();
     m_llTimeSpan = static_cast< long long >( 3.0 * dNSpeed * 1000000 );
 
     memset( m_pNoteState, -1, sizeof( m_pNoteState ) );
-    memset( m_pInputState, -1, sizeof( m_pInputState ) );
     
     AdvanceIterators( m_llStartTime, true );
-}
-
-void MainScreen::InitLearning( bool bResetMinTime )
-{
-    m_bInTransition = false;
-    m_iNotesAlpha = m_iNotesTime = m_iWaitingAlpha = m_iWaitingTime = 0;
-    m_iLearnPos = m_iStartPos;
-    if ( m_eGameMode == Learn && m_eLearnMode == Adaptive )
-        m_llTransitionTime = GetMinTime() - 1;
-    if ( bResetMinTime )
-    {
-        m_llMinTime = -1;
-        m_bForceWait = false;
-    }
-    m_iGoodCount = 0;
-    m_cbLastNotes.clear();
 }
 
 // Called immediately before changing to this state
@@ -683,16 +623,10 @@ GameState::GameError MainScreen::Init()
     static const AudioSettings &cAudio = Config::GetConfig().GetAudioSettings();
     if ( cAudio.iOutDevice >= 0 )
         m_OutDevice.Open( cAudio.iOutDevice );
-    if ( cAudio.iInDevice >= 0 )
-    {
-        if ( !m_InDevice.Open( cAudio.iInDevice ) && m_eGameMode != Practice )
-            return BadInputDevice;
-    }
-    else if ( m_eGameMode != Practice )
+    if ( m_eGameMode != Practice )
         return NoInputDevice;
 
     m_OutDevice.SetVolume( 1.0 );
-    NextTrack(); // Called here so settings don't get overwritten
     return Success;
 }
 
@@ -748,12 +682,11 @@ ChannelSettings* MainScreen::GetChannelSettings( int iTrack )
     return NULL;
 }
 
-void MainScreen::SetChannelSettings( const vector< bool > &vScored, const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor )
+void MainScreen::SetChannelSettings( const vector< bool > &vMuted, const vector< bool > &vHidden, const vector< unsigned > &vColor )
 {
     const MIDI::MIDIInfo &mInfo = m_MIDI.GetInfo();
     const vector< MIDITrack* > &vTracks = m_MIDI.GetTracks();
 
-    bool bScored = vScored.size() > 0;
     bool bMuted = vMuted.size() > 0;
     bool bHidden = vHidden.size() > 0;
     bool bColor = vColor.size() > 0;
@@ -765,7 +698,6 @@ void MainScreen::SetChannelSettings( const vector< bool > &vScored, const vector
         for ( int j = 0; j < 16; j++ )
             if ( mTrackInfo.aNoteCount[j] > 0 )
             {
-                ScoreChannel( i, j, bScored ? vScored[min( iPos, vScored.size() - 1 )] : false );
                 MuteChannel( i, j, bMuted ? vMuted[min( iPos, vMuted.size() - 1 )] : false );
                 HideChannel( i, j, bHidden ? vHidden[min( iPos, vHidden.size() - 1 )] : false );
                 if ( bColor && iPos < vColor.size() )
@@ -799,67 +731,17 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                     return Success;
                 case ID_PLAY_STOP:
                     JumpTo( GetMinTime() );
-                    m_Score.Reset();
-                    m_iShowTop10 = -1;
                     cPlayback.SetStopped( true );
                     return Success;
                 case ID_PLAY_SKIPFWD:
-                    if ( m_eGameMode == Play ) return Success;
                     JumpTo( static_cast< long long >( m_llStartTime + cControls.dFwdBackSecs * 1000000 ) );
                     return Success;
                 case ID_PLAY_SKIPBACK:
-                    if ( m_eGameMode == Play ) return Success;
                     JumpTo( static_cast< long long >( m_llStartTime - cControls.dFwdBackSecs * 1000000 ) );
-                    return Success;
-                case ID_PLAY_LOOP:
-                {
-                    if ( m_eGameMode != Practice && ( m_eGameMode != Learn || m_eLearnMode != Waiting ) ) return Success;
-
-                    cPlayback.SetLoop( false );
-                    long long llMinTime = GetMinTime();
-                    if ( m_llEndLoop >= llMinTime )
-                    {
-                        m_llTransitionTime = llMinTime - 1;
-                        m_llEndLoop = m_llTransitionTime - 1;
-                        wcscpy_s( m_sBuf, L"Loop Cleared" );
-                        m_tpMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f / 2.0f, 0xFFFFFFFF, m_sBuf );
-                        InitLearning();
-                    }
-                    else if ( m_llTransitionTime < llMinTime || m_llStartTime < m_llTransitionTime )
-                    {
-                        m_llTransitionTime = m_llStartTime;
-                        wcscpy_s( m_sBuf, L"Loop Start Set" );
-                        m_tpMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f / 2.0f, 0xFFFFFFFF, m_sBuf );
-                        InitLearning();
-                    }
-                    else
-                    {
-                        m_llEndLoop = m_llStartTime;
-                        wcscpy_s( m_sBuf, L"Loop End Set" );
-                        m_tpMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f / 2.0f, 0xFFFFFFFF, m_sBuf );
-                    }
-                    return Success;
-                }
-                case ID_LEARN_NEXTTRACK:
-                    NextTrack();
                     return Success;
                 case ID_VIEW_RESETDEVICE:
                     m_pRenderer->ResetDevice();
                     return Success;
-                case ID_SETLABEL:
-                {
-                    MIDIChannelEvent *pEvent = m_vEvents[lParam];
-                    if ( pEvent->GetLabel() )
-                        pEvent->SetLabel( cView.GetCurLabel() );
-                    else
-                    {
-                        PFAData::Label *pLabel = m_pFileInfo->add_label();
-                        pLabel->set_pos( (int)lParam );
-                        pLabel->set_label( cView.GetCurLabel() );
-                        pEvent->SetLabelPtr( pLabel->mutable_label() );
-                    }
-                    return Success;
-                }
                 case ID_VIEW_MOVEANDZOOM:
                     if ( cView.GetZoomMove() )
                     {
@@ -904,12 +786,9 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                     return Success;
                 case VK_OEM_PERIOD:
                     JumpTo( GetMinTime() );
-                    m_Score.Reset();
-                    m_iShowTop10 = -1;
                     cPlayback.SetStopped( true );
                     return Success;
                 case VK_UP:
-                    if ( m_eGameMode == Play ) return Success;
                     if ( bAlt && !bCtrl )
                         cPlayback.SetVolume( min( cPlayback.GetVolume() + 0.1, 1.0 ), true );
                     else if ( bShift && !bCtrl )
@@ -918,7 +797,6 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                         cPlayback.SetSpeed( cPlayback.GetSpeed() / ( 1.0 + cControls.dSpeedUpPct / 100.0 ), true );
                     return Success;
                 case VK_DOWN:
-                    if ( m_eGameMode == Play ) return Success;
                     if ( bAlt && !bShift && !bCtrl )
                         cPlayback.SetVolume( max( cPlayback.GetVolume() - 0.1, 0.0 ), true );
                     else if ( bShift && !bAlt && !bCtrl )
@@ -927,15 +805,12 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                         cPlayback.SetSpeed( cPlayback.GetSpeed() * ( 1.0 + cControls.dSpeedUpPct / 100.0 ), true );
                     return Success;
                 case 'R':
-                    if ( m_eGameMode == Play ) return Success;
                     cPlayback.SetSpeed( 1.0, true );
                     return Success;
                 case VK_LEFT:
-                    if ( m_eGameMode == Play ) return Success;
                     JumpTo( static_cast< long long >( m_llStartTime - cControls.dFwdBackSecs * 1000000 ) );
                     return Success;
                 case VK_RIGHT:
-                    if ( m_eGameMode == Play ) return Success;
                     JumpTo( static_cast< long long >( m_llStartTime + cControls.dFwdBackSecs * 1000000 ) );
                     return Success;
                 case 'M':
@@ -961,8 +836,6 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
         case WM_DEVICECHANGE:
             if ( cAudio.iOutDevice >= 0 && m_OutDevice.GetDevice() != cAudio.vMIDIOutDevices[cAudio.iOutDevice] )
                 m_OutDevice.Open( cAudio.iOutDevice );
-            if ( cAudio.iInDevice >= 0 && m_InDevice.GetDevice() != cAudio.vMIDIInDevices[cAudio.iInDevice] )
-                m_InDevice.Open( cAudio.iInDevice );
             break;
         case TBM_SETPOS:
         {
@@ -979,8 +852,6 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                 m_ptLastPos.y = ( SHORT )HIWORD( lParam );
                 m_bTrackPos = true;
             }
-            else
-                m_iSelectedNote = m_iHotNote;
 
             return Success;
         }
@@ -998,13 +869,6 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
             m_bTrackPos = m_bTrackZoom = false;
             return Success;
         case WM_LBUTTONUP:
-            if ( m_iSelectedNote >= 0 && m_iHotNote == m_iSelectedNote )
-            {
-                if ( m_vEvents[m_iHotNote]->GetLabel() ) cView.SetCurLabel( *m_vEvents[m_iHotNote]->GetLabel() );
-                else cView.SetCurLabel( "" );
-                PostMessage( hWnd, WM_COMMAND, ID_SETLABEL, m_iHotNote );
-            }
-            m_iSelectedNote = -1;
             m_bTrackPos = false;
             return Success;
         case WM_RBUTTONUP:
@@ -1012,11 +876,9 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
             return Success;
         case WM_MOUSEMOVE:
         {
-            if ( !m_bHaveMouse )
-                m_iNextHotNote = -1;
             m_bHaveMouse = true;
 
-            if ( !m_bTrackPos && !m_bTrackZoom && !m_bPaused ) return Success;
+            if ( !m_bPaused && !m_bTrackPos && !m_bTrackZoom ) return Success;
             short x = LOWORD( lParam );
             short y = HIWORD( lParam );
             short dx = static_cast< short >( x - m_ptLastPos.x );
@@ -1040,7 +902,6 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
             return Success;
         }
         case WM_MOUSELEAVE:
-            m_iSelectedNote = m_iNextHotNote = -1;
             m_bHaveMouse = false;
             return Success;
     }
@@ -1063,22 +924,18 @@ GameState::GameError MainScreen::Logic( void )
     double dNSpeed = cPlayback.GetNSpeed();
     bool bMute = cPlayback.GetMute();
     long long llTimeSpan = static_cast< long long >( 3.0 * dNSpeed * 1000000 );
-    LearnMode eLearnMode = cPlayback.GetLearnMode();
     bool bPausedChanged = ( bPaused != m_bPaused );
     bool bSpeedChanged = ( dSpeed != m_dSpeed );
     bool bMuteChanged = ( bMute != m_bMute );
     bool bTimeSpanChanged = ( llTimeSpan != m_llTimeSpan );
-    bool bLearnModeChanged = ( eLearnMode != m_eLearnMode );
     
     // Set the state
     m_bPaused = bPaused;
     m_dSpeed = dSpeed;
     m_bMute = bMute;
-    m_eLearnMode = eLearnMode;
     m_llTimeSpan = llTimeSpan;
     m_dVolume = cPlayback.GetVolume();
     m_bShowKB = cView.GetKeyboard();
-    m_bNoteLabels = cView.GetNoteLabels();
     m_bZoomMove = cView.GetZoomMove();
     m_fOffsetX = cView.GetOffsetX();
     m_fOffsetY = cView.GetOffsetY();
@@ -1090,15 +947,10 @@ GameState::GameError MainScreen::Logic( void )
     m_bShowFPS = cVideo.bShowFPS;
     m_pRenderer->SetLimitFPS( cVideo.bLimitFPS );
     if ( cVisual.iBkgColor != m_csBackground.iOrigBGR ) m_csBackground.SetColor( cVisual.iBkgColor, 0.7f, 1.3f );
-    m_bInstructions &= m_bPaused;
 
     double dMaxCorrect = ( mInfo.iMaxVolume > 0 ? 127.0 / mInfo.iMaxVolume : 1.0 );
     double dVolumeCorrect = ( mInfo.iVolumeSum > 0 ? ( m_dVolume * 127.0 * mInfo.iNoteCount ) / mInfo.iVolumeSum : 1.0 );
     dVolumeCorrect = min( dVolumeCorrect, dMaxCorrect );
-
-    m_iHotNote = m_iNextHotNote;
-    m_iNextHotNote = -1;
-    if ( !m_bPaused ) m_iSelectedNote = -1;
 
     // Time stuff
     long long llMaxTime = GetMaxTime();
@@ -1118,30 +970,16 @@ GameState::GameError MainScreen::Logic( void )
     if ( ( bPausedChanged || bMuteChanged ) && ( m_bPaused || m_bMute ) )
         m_OutDevice.AllNotesOff();
 
-    // If speed has been changed, rejigger inputpos
-    if ( bSpeedChanged && !m_bInTransition )
-        FindInputPos();
-
-    if ( bLearnModeChanged )
-        InitLearning();
-
     // Figure out start and end times for display
     long long llOldStartTime = m_llStartTime;
     long long llNextStartTime = m_llStartTime + static_cast< long long >( llElapsed * m_dSpeed + 0.5 );
 
     // Figure out if we need to wait
-    bool bWait = ( !m_bPaused ? DoWaiting( llNextStartTime, llElapsed ) : false );
 
-    if ( !bWait && !m_bPaused && m_llStartTime < llMaxTime )
+    if ( !m_bPaused && m_llStartTime < llMaxTime )
         m_llStartTime = llNextStartTime;
     m_iStartTick = GetCurrentTick( m_llStartTime );
     long long llEndTime = m_llStartTime + m_llTimeSpan;
-
-    // Figure out start and end times for input
-    long long llInputSpan = static_cast< long long >( GameScore::OkTime * m_dSpeed );
-    long long llStartInputTime = m_llStartTime - llInputSpan;
-    long long llEndInputTime = m_llStartTime + llInputSpan;
-    long long llLearnTime = m_llStartTime - TestTime;
 
     // Needs start time to be set. For creating textparticles.
     RenderGlobals();
@@ -1150,19 +988,8 @@ GameState::GameError MainScreen::Logic( void )
     int iEventCount = (int)m_vEvents.size();
     while ( m_iEndPos + 1 < iEventCount && m_vEvents[m_iEndPos + 1]->GetAbsMicroSec() < llEndTime )
     {
-        MIDIChannelEvent *pEvent = m_vEvents[m_iEndPos + 1];
-        if ( m_InDevice.IsOpen() && pEvent->GetAbsMicroSec() >= m_llMinTime && 
-            ( m_vTrackSettings[pEvent->GetTrack()].aChannels[pEvent->GetChannel()].bScored || 
-              ( m_eGameMode == Learn && m_iLearnOrdinal < 0 ) ) )
-            pEvent->SetInputQuality( MIDIChannelEvent::OnRadar );
-        else
-            pEvent->SetInputQuality( MIDIChannelEvent::Ignore );
         m_iEndPos++;
     }
-        
-    // Advance end input pos. EndInputPos probably doesn't need to exist :/
-    while ( m_iEndInputPos + 1 < iEventCount && m_vEvents[m_iEndInputPos + 1]->GetAbsMicroSec() < llEndInputTime )
-        m_iEndInputPos++;
 
     // Only want to advance start positions when unpaused becuase advancing startpos "consumes" the events
     if ( !m_bPaused )
@@ -1174,72 +1001,20 @@ GameState::GameError MainScreen::Logic( void )
             MIDIChannelEvent *pEvent = m_vEvents[m_iStartPos];
             if ( pEvent->GetChannelEventType() != MIDIChannelEvent::NoteOn )
                 m_OutDevice.PlayEvent( pEvent->GetEventCode(), pEvent->GetParam1(), pEvent->GetParam2() );
-            else if ( !m_bMute && !m_vTrackSettings[pEvent->GetTrack()].aChannels[pEvent->GetChannel()].bMuted &&
-                      ( m_eGameMode != Learn || m_iLearnOrdinal >= 0 ) )
+            else if ( !m_bMute && !m_vTrackSettings[pEvent->GetTrack()].aChannels[pEvent->GetChannel()].bMuted )
                 m_OutDevice.PlayEvent( pEvent->GetEventCode(), pEvent->GetParam1(),
                                        static_cast< int >( pEvent->GetParam2() * dVolumeCorrect + 0.5 ) );
             UpdateState( m_iStartPos );
             m_iStartPos++;
         }
-
-        // Advance start input pos. Add to score. StartInputPos primarily serves as missed note detection
-        while ( m_iStartInputPos < iEventCount && m_vEvents[m_iStartInputPos]->GetAbsMicroSec() <= llStartInputTime )
-        {
-            MIDIChannelEvent *pEvent = m_vEvents[m_iStartInputPos];
-            if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn && pEvent->GetParam2() > 0 )
-            {
-                int iNote = pEvent->GetParam1();
-                MIDIChannelEvent::InputQuality eInputQuality = pEvent->GetInputQuality();
-                if ( eInputQuality == MIDIChannelEvent::OnRadar )
-                {
-                    eInputQuality = MIDIChannelEvent::Missed;
-                    pEvent->SetInputQuality( eInputQuality );
-                    m_Score.Missed();
-
-                    float x = GetNoteX( iNote );
-                    float cx = m_fWhiteCX * ( MIDI::IsSharp( iNote ) ? SharpRatio : 1.0f );
-                    m_tpParticles[iNote].Reset( x + cx / 2.0f, 0.0f, GameScore::MissedColor, GameScore::MissedText );
-                }
-                if ( m_eGameMode == Learn && m_eLearnMode == Adaptive && eInputQuality != MIDIChannelEvent::Ignore && pEvent->GetAbsMicroSec() >= m_llMinTime )
-                {
-                    if ( m_cbLastNotes.full() ) m_iGoodCount -= m_cbLastNotes.front().first;
-                    m_cbLastNotes.push_back( pair< int, int >( eInputQuality == MIDIChannelEvent::Missed ? 1 : 0, m_iStartInputPos ) );
-                    m_iGoodCount += m_cbLastNotes.back().first;
-                }
-            }
-            m_iStartInputPos++;
-        }
-
-        //Advance the learning iterator
-        while ( m_iLearnPos < iEventCount && m_vEvents[m_iLearnPos]->GetAbsMicroSec() <= llLearnTime )
-        {
-            MIDIChannelEvent *pEvent = m_vEvents[m_iLearnPos];
-            if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn && pEvent->GetParam2() > 0 && m_eGameMode == Learn &&
-                 m_eLearnMode == Adaptive && !m_bInTransition && pEvent->GetInputQuality() != MIDIChannelEvent::Ignore && pEvent->GetAbsMicroSec() >= m_llMinTime )
-            {
-                while ( m_cbLastNotes.size() > 0 && m_cbLastNotes.front().second <= m_iLearnPos )
-                {
-                    m_iGoodCount -= m_cbLastNotes.front().first;
-                    m_cbLastNotes.pop_front();
-                }
-                m_llTransitionTime = pEvent->GetAbsMicroSec() - 1000000 / 30;
-            }
-            m_iLearnPos++;
-        }
         
         PlayMetronome( dVolumeCorrect );
-        DoTransition( llElapsed, llOldStartTime );
     }
 
     // Advance the text particles
-    for ( int i = 0; i < 128; i++ )
-        if ( m_tpParticles[i].IsAlive() )
-            m_tpParticles[i].Logic( llElapsed );
     if ( m_tpMessage.IsAlive() ) m_tpMessage.Logic( llElapsed );
-    if ( m_tpLongMessage.IsAlive() ) m_tpLongMessage.Logic( llElapsed );
 
     AdvanceIterators( m_llStartTime, false );
-    ProcessInput();
 
     // Update the position slider
     long long llFirstTime = GetMinTime();
@@ -1249,21 +1024,9 @@ GameState::GameError MainScreen::Logic( void )
     if ( llOldPos != llNewPos ) cPlayback.SetPosition( static_cast< int >( llNewPos ) );
 
     // Song's over
-    if ( !m_bPaused && m_llStartTime >= llMaxTime && !m_bInTransition )
+    if ( !m_bPaused && m_llStartTime >= llMaxTime )
     {
-        if ( m_eGameMode == Learn && m_iLearnOrdinal >= 0 )
-        {
-            wcscpy_s( m_sBuf, L"You made it!\nMoving to the next track" );
-            m_tpLongMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f, 0x00FFFFFF, m_sBuf );
-            NextTrack();
-            JumpTo( GetMinTime() );
-        }
-        else
-        {
-            cPlayback.SetPaused( true, true );
-            if ( m_eGameMode == Play && m_iShowTop10 == -1 )
-                m_iShowTop10 = m_Score.AddToTop10( m_pFileInfo );
-        }
+        cPlayback.SetPaused( true, true );
     }
     return Success;
 }
@@ -1349,104 +1112,10 @@ void MainScreen::PlayMetronome( double dVolumeCorrect )
     }
 }
 
-void MainScreen::ProcessInput()
-{
-    static const ControlsSettings &cControls = Config::GetConfig().GetControlsSettings();
-    static PlaybackSettings &cPlayback = Config::GetConfig().GetPlaybackSettings();
-
-    int iMilliSecs;
-    unsigned char cStatus, cParam1, cParam2;
-    while ( m_InDevice.GetMIDIMessage( cStatus, cParam1, cParam2, iMilliSecs ) )
-    {
-        MIDIChannelEvent::ChannelEventType eEventType = static_cast< MIDIChannelEvent::ChannelEventType >( cStatus >> 4 );
-        if ( eEventType == MIDIChannelEvent::NoteOff || ( eEventType == MIDIChannelEvent::NoteOn && cParam2 == 0 ) )
-            m_pInputState[cParam1] = -1;
-        else if ( eEventType == MIDIChannelEvent::NoteOn )
-        {
-            if ( m_bInstructions )
-            {
-                 m_bInstructions = false;
-                 cPlayback.SetPaused( false, true );
-            }
-            else if ( cControls.aKeyboardMap[cParam1] > 0 )
-                PostMessage( g_hWnd, WM_COMMAND, cControls.aKeyboardMap[cParam1] + 33, 0 );
-            else
-            {
-                int iSecondaryPos = -1;
-                m_pInputState[cParam1] = -2;
-                for ( int i = m_iStartInputPos; i <= m_iEndInputPos; i++ )
-                {
-                    MIDIChannelEvent *pEvent = m_vEvents[i];
-                    if ( pEvent->GetChannelEventType() == eEventType && pEvent->GetParam2() > 0 &&
-                         pEvent->GetParam1() == cParam1 )
-                    {
-                        if ( pEvent->GetInputQuality() == MIDIChannelEvent::OnRadar ||
-                             pEvent->GetInputQuality() == MIDIChannelEvent::Waiting )
-                        {
-                            m_pInputState[cParam1] = i;
-                            break;
-                        }
-                        else if ( pEvent->GetInputQuality() == MIDIChannelEvent::Ignore )
-                            iSecondaryPos = i;
-                    }
-                }
-                if ( m_pInputState[cParam1] >= 0 ) iSecondaryPos = -1;
-                else if ( iSecondaryPos >= 0 ) m_pInputState[cParam1] = iSecondaryPos;
-
-                if ( !m_bPaused )
-                {
-                    if ( m_pInputState[cParam1] >= 0 )
-                    {
-                        MIDIChannelEvent *pEvent = m_vEvents[m_pInputState[cParam1]];
-                        MIDIChannelEvent::InputQuality eQuality = m_Score.HitQuality( m_llStartTime - pEvent->GetAbsMicroSec(), m_dSpeed );
-                        pEvent->SetInputQuality( eQuality );
-                        if ( iSecondaryPos < 0 ) m_Score.Hit( eQuality );
-
-                        if ( m_eGameMode != Learn || m_eLearnMode != Waiting )
-                        {
-                            float x = GetNoteX( cParam1 );
-                            float cx = m_fWhiteCX * ( MIDI::IsSharp( cParam1 ) ? SharpRatio : 1.0f );
-                            unsigned iColor = ( eQuality == MIDIChannelEvent::Great ? GameScore::GreatColor : eQuality == MIDIChannelEvent::Good ? GameScore::GoodColor : GameScore::OkColor );
-                            const wchar_t *sText = ( eQuality == MIDIChannelEvent::Great ? GameScore::GreatText : eQuality == MIDIChannelEvent::Good ? GameScore::GoodText : GameScore::OkText );
-                            m_tpParticles[cParam1].Reset( x + cx / 2.0f, 0.0f, iColor, sText );
-                        }
-   
-                        m_bForceWait = false;
-                        break;
-                    }
-                    else
-                    {
-                        if ( iSecondaryPos < 0 ) m_Score.Incorrect();
-
-                        float x = GetNoteX( cParam1 );
-                        float cx = m_fWhiteCX * ( MIDI::IsSharp( cParam1 ) ? SharpRatio : 1.0f );
-                        m_tpParticles[cParam1].Reset( x + cx / 2.0f, 0.0f, GameScore::IncorrectColor, GameScore::IncorrectText );
-
-                        if ( m_eGameMode == Learn && m_eLearnMode == Adaptive && m_llStartTime >= m_llMinTime )
-                        {
-                            if ( m_cbLastNotes.full() ) m_iGoodCount -= m_cbLastNotes.front().first;
-                            m_cbLastNotes.push_back( pair< int, int >( 1, m_iStartInputPos ) );
-                            m_iGoodCount += m_cbLastNotes.back().first;
-                        }
-                    }
-                }
-            }
-
-            // Resets the windows inactivity timer
-            INPUT in = { 0 };
-            in.type = INPUT_MOUSE;
-            in.mi.dwFlags = MOUSEEVENTF_MOVE;
-            SendInput( 1, &in, sizeof( INPUT ) );
-        }
-    }
-}
-
 void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearning )
 {
     // Kill the music!
     m_OutDevice.AllNotesOff();
-    m_bInstructions = false;
-    if ( bInitLearning ) InitLearning();
 
     // Start time. Piece of cake!
     long long llFirstTime = GetMinTime();
@@ -1461,12 +1130,12 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
     eventvec_t::iterator itMiddle = lower_bound( itBegin, itEnd, pair< long long, int >( llStartTime, 0 ) );
 
     // Start position
-    m_iStartPos = m_iLearnPos = (int)m_vEvents.size();
+    m_iStartPos = (int)m_vEvents.size();
     if ( itMiddle != itEnd && itMiddle->second < m_iStartPos )
-        m_iStartPos = m_iLearnPos = itMiddle->second;
+        m_iStartPos = itMiddle->second;
     eventvec_t::iterator itNonNote = lower_bound( m_vNonNotes.begin(), m_vNonNotes.end(), pair< long long, int >( llStartTime, 0 ) );
     if ( itNonNote != m_vNonNotes.end() && itNonNote->second < m_iStartPos )
-        m_iStartPos = m_iLearnPos = itNonNote->second;
+        m_iStartPos = itNonNote->second;
 
     // Find the notes that occur simultaneously with the previous note on
     m_vState.clear();
@@ -1485,7 +1154,6 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
             if ( pSister->GetAbsMicroSec() > llStartTime ) // > because we don't care about simultaneous ending notes
             {
                 m_vState.push_back( it->second );
-                pEvent->SetInputQuality( MIDIChannelEvent::Ignore );
                 if ( m_pNoteState[pEvent->GetParam1()] < 0 )
                     m_pNoteState[pEvent->GetParam1()] = it->second;
             }
@@ -1498,18 +1166,10 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
     int iEventCount = (int)m_vEvents.size();
     while ( m_iEndPos + 1 < iEventCount && m_vEvents[m_iEndPos + 1]->GetAbsMicroSec() < llEndTime )
     {
-        MIDIChannelEvent *pEvent = m_vEvents[m_iEndPos + 1];
-        if ( m_InDevice.IsOpen() && pEvent->GetAbsMicroSec() >= m_llMinTime && 
-            ( m_vTrackSettings[pEvent->GetTrack()].aChannels[pEvent->GetChannel()].bScored || 
-              ( m_eGameMode == Learn && m_iLearnOrdinal < 0 ) ) )
-            pEvent->SetInputQuality( MIDIChannelEvent::OnRadar );
-        else
-            pEvent->SetInputQuality( MIDIChannelEvent::Ignore );
         m_iEndPos++;
     }
 
     // Input position, iterators, tick
-    FindInputPos();
     eventvec_t::const_iterator itOldProgramChange = m_itNextProgramChange;
     AdvanceIterators( llStartTime, true );
     PlaySkippedEvents( itOldProgramChange );
@@ -1521,27 +1181,6 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
         long long llNewPos = ( ( m_llStartTime - llFirstTime ) * 1000 ) / ( llLastTime - llFirstTime );
         cPlayback.SetPosition( static_cast< int >( llNewPos ) );
     }
-}
-
-// Reset input pos upon change of speed or jump in start time
-// Linear search because we're already so close. Much faster than a logN lookup for almost all songs
-void MainScreen::FindInputPos()
-{
-    long long llInputSpan = static_cast< long long >( GameScore::OkTime * m_dSpeed );
-
-    long long llStartInputTime = m_llStartTime - llInputSpan;
-    m_iStartInputPos = m_iStartPos;
-    while ( m_iStartInputPos - 1 >= 0 && m_vEvents[m_iStartInputPos - 1]->GetAbsMicroSec() > llStartInputTime )
-    {
-        m_vEvents[m_iStartInputPos - 1]->SetInputQuality( MIDIChannelEvent::Ignore );
-        m_iStartInputPos--;
-    }
-
-    long long llEndInputTime = m_llStartTime + llInputSpan;
-    m_iEndInputPos = m_iStartPos - 1;
-    int iEventCount = (int)m_vEvents.size();
-    while ( m_iEndInputPos + 1 < iEventCount && m_vEvents[m_iEndInputPos + 1]->GetAbsMicroSec() < llEndInputTime )
-        m_iEndInputPos++;
 }
 
 // Plays skipped program change and controller events. Only plays the one's needed.
@@ -1676,162 +1315,6 @@ MIDIMetaEvent* MainScreen::GetPrevious( eventvec_t::const_iterator &itCurrent,
     return NULL;
 }
 
-void MainScreen::NextTrack()
-{
-    if ( m_eGameMode != Learn ) return;
-    const MIDI::MIDIInfo &mInfo = m_MIDI.GetInfo();
-    const vector< MIDITrack* > &vTracks = m_MIDI.GetTracks();
-
-    // Reset and undo old one
-    InitLearning();
-    if ( m_iLearnOrdinal >= 0 )
-        m_vTrackSettings[m_iLearnTrack].aChannels[m_iLearnChannel].bScored = 
-            m_vTrackSettings[m_iLearnTrack].aChannels[m_iLearnChannel].bMuted = false;
-
-    // All tracks
-    m_iLearnOrdinal++;
-    m_iLearnChannel++;
-    if ( m_iLearnOrdinal == mInfo.iNumChannels || mInfo.iNumChannels == 1 )
-    {
-        m_iLearnTrack = 0;
-        m_iLearnOrdinal = m_iLearnChannel = -1;
-    }
-    // Find the next track
-    else
-    {
-        bool bFound = false;
-        for ( ; m_iLearnTrack < mInfo.iNumTracks; m_iLearnTrack++ )
-        {
-            const MIDITrack::MIDITrackInfo &mTrackInfo = vTracks[m_iLearnTrack]->GetInfo();
-            for ( ; m_iLearnChannel < 16; m_iLearnChannel++ )
-                if ( mTrackInfo.aNoteCount[m_iLearnChannel] > 0 )
-                {
-                    m_vTrackSettings[m_iLearnTrack].aChannels[m_iLearnChannel].bScored = 
-                        m_vTrackSettings[m_iLearnTrack].aChannels[m_iLearnChannel].bMuted = bFound = true;
-                    break;
-                }
-            if ( bFound ) break;
-            m_iLearnChannel = 0;
-        }
-    }
-
-    // Change the note status
-    for ( int i = m_iStartPos; i <= m_iEndPos; i++ )
-    {
-        MIDIChannelEvent *pEvent = m_vEvents[i];
-        if ( m_InDevice.IsOpen() && pEvent->GetAbsMicroSec() >= m_llMinTime && 
-            ( m_vTrackSettings[pEvent->GetTrack()].aChannels[pEvent->GetChannel()].bScored || 
-              ( m_eGameMode == Learn && m_iLearnOrdinal < 0 ) ) )
-            pEvent->SetInputQuality( MIDIChannelEvent::OnRadar );
-        else
-            pEvent->SetInputQuality( MIDIChannelEvent::Ignore );
-    }
-}
-
-bool MainScreen::DoTransition( long long llElapsed, long long llOldStartTime )
-{
-    if ( ( m_eGameMode != Learn || m_eLearnMode != Adaptive ) && m_llEndLoop < m_llTransitionTime ) return false;
-    bool bGoodJob = false;
-
-    // Update transition state and return
-    if ( m_bInTransition )
-    {
-        bool bFadeOut = ( m_iNotesTime < TransitionTime );
-        m_iNotesTime += static_cast< int >( llElapsed );
-        if ( m_iNotesTime >= 2 * TransitionTime )
-        {
-            InitLearning( false );
-            m_bForceWait = m_InDevice.IsOpen();
-            return false;
-        }
-        if ( bFadeOut && m_iNotesTime >= TransitionTime )
-        {
-            m_llMinTime = m_llTransitionTime;
-            JumpTo( m_llMinTime - static_cast< long long>( TransitionTime * m_dSpeed ), true, false );
-        }
-        m_iNotesAlpha = ( ( -abs( m_iNotesTime - TransitionTime ) + TransitionTime ) * 255 ) / TransitionTime;
-        return true;
-    }
-    // We haven't hit the 7.5 seconds or whatever it is to make a determination yet
-    else if ( m_llTransitionTime < GetMinTime() )
-        return false;
-    // Learning mode check
-    else if ( m_eGameMode == Learn && m_eLearnMode == Adaptive )
-    {
-        if ( m_cbLastNotes.empty() )
-            return false;
-        else if ( m_eLearnMode == Adaptive && ( m_iGoodCount * 100 ) / m_cbLastNotes.size() <= TransitionPct )
-        {
-            if ( m_dSpeed < 0.9999 ) bGoodJob = true;
-            else return false;
-        }
-    }
-    // Did we pass the loop end?
-    else if ( llOldStartTime > m_llEndLoop || m_llStartTime <= m_llEndLoop )
-        return false;
-
-    // Definitely going to transition. Kick of a message indicating as such.
-    if ( m_eGameMode != Learn || m_eLearnMode != Adaptive )
-    {
-        wcscpy_s( m_sBuf, L"Looping..." );
-        m_tpMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f / 2.0f, 0x00FFFFFF, m_sBuf );
-    }
-    else
-    {
-        PlaybackSettings &cPlayback = Config::GetConfig().GetPlaybackSettings();
-        if ( bGoodJob )
-        {
-            cPlayback.SetSpeed( min( m_dSpeed / 0.80, 1.0 ), true );
-            wcscpy_s( m_sBuf, L"Good job!\nTry again faster!" );
-            m_tpLongMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f, 0x00FFFFFF, m_sBuf );
-        }
-        else
-        {
-            cPlayback.SetSpeed( max( m_dSpeed * 0.80, 0.25 ), true );
-            wcscpy_s( m_sBuf, L"Try again with fewer mistakes!" );
-            m_tpLongMessage.Reset( m_pRenderer->GetBufferWidth() / 2.0f, m_pRenderer->GetBufferHeight() * ( 1.0f - KBPercent ) / 2.0f - 35.0f / 2.0f, 0x00FFFFFF, m_sBuf );
-        }
-    }
-
-    m_bInTransition = true;
-    return true;
-}
-
-bool MainScreen::DoWaiting( long long llNextStartTime, long long llElapsed )
-{
-    bool bWait = false;
-    int iEventCount = (int)m_vEvents.size();
-    int iNewStartPos = m_iStartPos;
-    if ( ( m_eGameMode == Learn && m_eLearnMode == Waiting ) || m_bForceWait )
-        while ( iNewStartPos < iEventCount && m_vEvents[iNewStartPos]->GetAbsMicroSec() <= llNextStartTime )
-        {
-            MIDIChannelEvent *pEvent = m_vEvents[iNewStartPos];
-            if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn && pEvent->GetParam2() > 0 &&
-                 ( pEvent->GetInputQuality() == MIDIChannelEvent::OnRadar || pEvent->GetInputQuality() == MIDIChannelEvent::Waiting ||
-                   m_eGameMode != Learn || m_eLearnMode != Waiting ) )
-            {
-                if ( !bWait )
-                {
-                    llElapsed -= pEvent->GetAbsMicroSec() - 1 - m_llStartTime;
-                    m_llStartTime = pEvent->GetAbsMicroSec() - 1;
-                }
-                pEvent->SetInputQuality( MIDIChannelEvent::Waiting );
-                bWait = true;
-            }
-            iNewStartPos++;
-        }
-
-    if ( bWait )
-    {
-        m_iWaitingTime += static_cast< int >( llElapsed );
-        if ( m_iWaitingTime > FlashTime * 2 ) m_iWaitingTime = 0;
-        m_iWaitingAlpha = ( ( -abs( m_iWaitingTime - FlashTime ) + FlashTime ) * 255 ) / FlashTime;
-    }
-    else
-        m_iWaitingAlpha = 0;
-    return bWait;
-}
-
 // Gets the tick corresponding to llStartTime using current tempo
 int  MainScreen::GetCurrentTick( long long llStartTime )
 {
@@ -1921,7 +1404,6 @@ GameState::GameError MainScreen::Render()
     m_pRenderer->BeginScene();
     RenderLines();
     RenderNotes();
-    RenderLabels();
     if ( m_bShowKB )
         RenderKeys();
     RenderBorder();
@@ -2109,13 +1591,10 @@ void MainScreen::RenderNote( int iPos )
     int iNote = pNote->GetParam1();
     int iTrack = pNote->GetTrack();
     int iChannel = pNote->GetChannel();
-    MIDIChannelEvent::InputQuality eInputQuality = pNote->GetInputQuality();
     long long llNoteStart = pNote->GetAbsMicroSec();
     long long llNoteEnd = pNote->GetSister()->GetAbsMicroSec();
 
-    bool bBadLearn = ( m_eGameMode == Learn && m_iLearnOrdinal >= 0 && ( iTrack != m_iLearnTrack || iChannel != m_iLearnChannel ) );
-    ChannelSettings &csTrack = ( eInputQuality == MIDIChannelEvent::Missed || bBadLearn ? m_csKBBadNote :
-                                 m_vTrackSettings[iTrack].aChannels[iChannel] );
+    ChannelSettings &csTrack = ( m_vTrackSettings[iTrack].aChannels[iChannel] );
     if ( m_vTrackSettings[iTrack].aChannels[iChannel].bHidden ) return;
 
     // Compute true positions
@@ -2145,115 +1624,15 @@ void MainScreen::RenderNote( int iPos )
         y = fMinY + cy;
     }
 
-    if ( m_ptLastPos.x >= x && m_ptLastPos.x <= x + cx &&
-         m_ptLastPos.y <= y && m_ptLastPos.y >= y - cy )
-        m_iNextHotNote = iPos;
-
     // Visualize!
-    int iAlpha = ( eInputQuality == MIDIChannelEvent::Waiting ? m_iWaitingAlpha : m_iNotesAlpha ) << 24;
-    if ( m_bPaused && m_bHaveMouse && iPos == m_iHotNote && !m_bZoomMove && ( m_iSelectedNote == -1 || m_iSelectedNote == iPos ) )
-    {
-        m_pRenderer->DrawRect( x, y - cy, cx, cy, csTrack.iPrimaryRGB | iAlpha );
-        m_pRenderer->DrawRect( x + fDeflate, y - cy + fDeflate,
-                                cx - fDeflate * 2.0f, cy - fDeflate * 2.0f,
-                                csTrack.iVeryDarkRGB | iAlpha, csTrack.iDarkRGB | iAlpha, csTrack.iDarkRGB | iAlpha, csTrack.iVeryDarkRGB | iAlpha );
-    }
-    else if ( llNoteStart < m_llMinTime && !bBadLearn )
-    {
-        m_pRenderer->DrawRect( x, y - cy, fDeflate, cy, csTrack.iVeryDarkRGB | iAlpha );
-        m_pRenderer->DrawRect( x, y - cy, cx, fDeflate, csTrack.iVeryDarkRGB | iAlpha );
-        m_pRenderer->DrawRect( x + cx - fDeflate, y - cy, fDeflate, cy, csTrack.iVeryDarkRGB | iAlpha );
-        m_pRenderer->DrawRect( x, y - fDeflate, cx, fDeflate, csTrack.iVeryDarkRGB | iAlpha );
-    }
-    else
+    int iAlpha = ( 0 ) << 24;
+
     {
         m_pRenderer->DrawRect( x, y - cy, cx, cy, csTrack.iVeryDarkRGB | iAlpha );
         m_pRenderer->DrawRect( x + fDeflate, y - cy + fDeflate,
                                 cx - fDeflate * 2.0f, cy - fDeflate * 2.0f,
                                 csTrack.iPrimaryRGB | iAlpha, csTrack.iDarkRGB | iAlpha, csTrack.iDarkRGB | iAlpha, csTrack.iPrimaryRGB | iAlpha );
     }
-}
-
-// Similar to RenderNotes. It's not in that function because text is done separate.
-void MainScreen::RenderLabels()
-{
-    // Do we have any notes to render?
-    if ( m_iEndPos < 0 || m_iStartPos >= static_cast< int >( m_vEvents.size() ) )
-        return;
-
-    bool bSetState = true;
-    for ( vector< int >::iterator it = m_vState.begin(); it != m_vState.end(); ++it )
-        bSetState &= !RenderLabel( *it, bSetState );
-
-    for ( int i = m_iStartPos; i <= m_iEndPos; i++ )
-    {
-        MIDIChannelEvent *pEvent = m_vEvents[i];
-        if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn &&
-             pEvent->GetParam2() > 0 && pEvent->GetSister() )
-            bSetState &= !RenderLabel( i, bSetState );
-    }
-
-    for ( int i = 0; i < 128; i++ )
-        if ( m_tpParticles[i].IsAlive() )
-        {
-            if ( bSetState ) m_pRenderer->BeginText();
-            m_tpParticles[i].Render( m_pRenderer, 0.0f, m_fNotesY + m_fNotesCY );
-            bSetState = false;
-        }
-
-    if ( !bSetState ) m_pRenderer->EndText();
-}
-
-bool MainScreen::RenderLabel( int iPos, bool bSetState )
-{
-    const MIDIChannelEvent *pNote = m_vEvents[iPos];
-
-    const string *sLabel = pNote->GetLabel();
-    int iLabels = ( m_bNoteLabels ? 1 : 0 ) + ( sLabel && sLabel->length() > 0 ? 1 : 0 );
-    if ( !iLabels ) return false;
-
-    int iNote = pNote->GetParam1();
-    int iTrack = pNote->GetTrack();
-    int iChannel = pNote->GetChannel();
-    MIDIChannelEvent::InputQuality eInputQuality = pNote->GetInputQuality();
-    long long llNoteStart = pNote->GetAbsMicroSec();
-    ChannelSettings &csTrack = ( eInputQuality == MIDIChannelEvent::Missed ? m_csKBBadNote :
-                                 m_vTrackSettings[iTrack].aChannels[iChannel] );
-    if ( m_vTrackSettings[iTrack].aChannels[iChannel].bHidden ) return false;
-
-    // Compute true positions
-    float x = GetNoteX( iNote );
-    float y = m_fNotesY + m_fNotesCY * ( 1.0f - static_cast< float >( llNoteStart - m_llRndStartTime ) / m_llTimeSpan );
-    float cx =  MIDI::IsSharp( iNote ) ? m_fWhiteCX * SharpRatio : m_fWhiteCX;
-
-    float fMaxY = m_fNotesY + m_fNotesCY + 3.0f + 15.0f * iLabels;
-    if ( y > fMaxY ) return false;
-
-    y = floor( y + 0.5f );
-    RECT rc = { static_cast< int >( x + cx / 2.0f + 0.5f ), static_cast< int >( y - ( 3.0f + 15.0f * iLabels ) ), 0, 0 };
-    rc.right = rc.left;
-
-    if ( bSetState ) m_pRenderer->BeginText();
-
-    int iAlpha = ( 0xFF - ( eInputQuality == MIDIChannelEvent::Waiting ? m_iWaitingAlpha : m_iNotesAlpha ) ) << 24;
-    if ( sLabel && sLabel->length() > 0 )
-    {
-        OffsetRect( &rc, -1, -1 );
-        m_pRenderer->DrawTextA( sLabel->c_str(), Renderer::SmallBold, &rc, DT_CENTER | DT_NOCLIP, csTrack.iVeryDarkRGB | iAlpha );
-        OffsetRect( &rc, 1, 1 );
-        m_pRenderer->DrawTextA( sLabel->c_str(), Renderer::SmallBold, &rc, DT_CENTER | DT_NOCLIP, 0x00FFFFFF | iAlpha );
-        OffsetRect( &rc, 0, 15 );
-    }
-    if ( m_bNoteLabels )
-    {
-        OffsetRect( &rc, -1, -1 );
-        const wstring &sLabel = MIDI::NoteName( iNote );
-        m_pRenderer->DrawTextW( sLabel.c_str(), Renderer::SmallBold, &rc, DT_CENTER | DT_NOCLIP, csTrack.iVeryDarkRGB | iAlpha, (int)sLabel.length() - 1 );
-        OffsetRect( &rc, 1, 1 );
-        m_pRenderer->DrawTextW( sLabel.c_str(), Renderer::SmallBold, &rc, DT_CENTER | DT_NOCLIP, 0x00FFFFFF | iAlpha, (int)sLabel.length() - 1 );
-    }
-
-    return true;
 }
 
 float MainScreen::GetNoteX( int iNote )
@@ -2307,7 +1686,7 @@ void MainScreen::RenderKeys()
     for ( int i = iStartRender; i <= iEndRender; i++ )
         if ( !MIDI::IsSharp( i ) )
         {
-            if ( m_pNoteState[i] == -1 && m_pInputState[i] == -1 )
+            if ( m_pNoteState[i] == -1 )
             {
                 m_pRenderer->DrawRect( fCurX + fKeyGap1 , fCurY, m_fWhiteCX - fKeyGap, fTopCY + fNearCY,
                     m_csKBWhite.iDarkRGB, m_csKBWhite.iDarkRGB, m_csKBWhite.iPrimaryRGB, m_csKBWhite.iPrimaryRGB );
@@ -2326,11 +1705,11 @@ void MainScreen::RenderKeys()
             }
             else
             {
-                const MIDIChannelEvent *pEvent = ( m_pInputState[i] >= 0 ? m_vEvents[m_pInputState[i]] : m_pNoteState[i] >= 0 ? m_vEvents[m_pNoteState[i]] : NULL );
+                const MIDIChannelEvent *pEvent = ( m_pNoteState[i] >= 0 ? m_vEvents[m_pNoteState[i]] : NULL );
                 const int iTrack = ( pEvent ? pEvent->GetTrack() : -1 );
                 const int iChannel = ( pEvent ? pEvent->GetChannel() : -1 );
 
-                int iAlpha = m_iNotesAlpha << 24;
+                int iAlpha = 0 << 24;
                 if ( iAlpha )
                 {
                     m_pRenderer->DrawRect( fCurX + fKeyGap1 , fCurY, m_fWhiteCX - fKeyGap, fTopCY + fNearCY - 2.0f,
@@ -2338,10 +1717,7 @@ void MainScreen::RenderKeys()
                     m_pRenderer->DrawRect( fCurX + fKeyGap1 , fCurY + fTopCY + fNearCY - 2.0f, m_fWhiteCX - fKeyGap, 2.0f, m_csKBWhite.iDarkRGB );
                 }
 
-                bool bBadLearn = ( m_eGameMode == Learn && m_iLearnOrdinal >= 0 && ( iTrack != m_iLearnTrack || iChannel != m_iLearnChannel ) );
-                ChannelSettings &csKBWhite = ( m_pInputState[i] == -2 || bBadLearn ||
-                                               pEvent->GetInputQuality() == MIDIChannelEvent::Missed ? m_csKBBadNote :
-                                               m_vTrackSettings[iTrack].aChannels[iChannel] );
+                ChannelSettings &csKBWhite = ( m_vTrackSettings[iTrack].aChannels[iChannel] );
                 m_pRenderer->DrawRect( fCurX + fKeyGap1 , fCurY, m_fWhiteCX - fKeyGap, fTopCY + fNearCY - 2.0f,
                     csKBWhite.iDarkRGB | iAlpha, csKBWhite.iDarkRGB | iAlpha, csKBWhite.iPrimaryRGB | iAlpha, csKBWhite.iPrimaryRGB | iAlpha );
                 m_pRenderer->DrawRect( fCurX + fKeyGap1 , fCurY + fTopCY + fNearCY - 2.0f, m_fWhiteCX - fKeyGap, 2.0f, csKBWhite.iDarkRGB | iAlpha );
@@ -2385,7 +1761,7 @@ void MainScreen::RenderKeys()
             const float fSharpTopX1 = x + m_fWhiteCX * ( SharpRatio - fSharpTop ) / 2.0f;
             const float fSharpTopX2 = fSharpTopX1 + m_fWhiteCX * fSharpTop;
 
-            if ( m_pNoteState[i] == -1 && m_pInputState[i] == -1 )
+            if ( m_pNoteState[i] == -1 )
             {
                 m_pRenderer->DrawSkew( fSharpTopX1, fCurY + fSharpCY - fNearCY,
                                        fSharpTopX2, fCurY + fSharpCY - fNearCY,
@@ -2413,13 +1789,13 @@ void MainScreen::RenderKeys()
             }
             else
             {
-                const MIDIChannelEvent *pEvent = ( m_pInputState[i] >= 0 ? m_vEvents[m_pInputState[i]] : m_pNoteState[i] >= 0 ? m_vEvents[m_pNoteState[i]] : NULL );
+                const MIDIChannelEvent *pEvent = ( m_pNoteState[i] >= 0 ? m_vEvents[m_pNoteState[i]] : NULL );
                 const int iTrack = ( pEvent ? pEvent->GetTrack() : -1 );
                 const int iChannel = ( pEvent ? pEvent->GetChannel() : -1 );
 
                 const float fNewNear = fNearCY * 0.25f;
 
-                const int iAlpha = m_iNotesAlpha << 24;
+                const int iAlpha = 0 << 24;
                 if ( iAlpha )
                 {
                     m_pRenderer->DrawSkew( fSharpTopX1, fCurY + fSharpCY - fNewNear,
@@ -2447,10 +1823,7 @@ void MainScreen::RenderKeys()
                                            m_csKBSharp.iPrimaryRGB, m_csKBSharp.iPrimaryRGB, m_csKBSharp.iVeryDarkRGB, m_csKBSharp.iVeryDarkRGB );
                 }
 
-                const bool bBadLearn = ( m_eGameMode == Learn && m_iLearnOrdinal >= 0 && ( iTrack != m_iLearnTrack || iChannel != m_iLearnChannel ) );
-                const ChannelSettings &csKBSharp = ( m_pInputState[i] == -2 || bBadLearn ||
-                                                     pEvent->GetInputQuality() == MIDIChannelEvent::Missed ? m_csKBBadNote :
-                                                     m_vTrackSettings[iTrack].aChannels[iChannel] );
+                const ChannelSettings &csKBSharp = ( m_vTrackSettings[iTrack].aChannels[iChannel] );
                 m_pRenderer->DrawSkew( fSharpTopX1, fCurY + fSharpCY - fNewNear,
                                        fSharpTopX2, fCurY + fSharpCY - fNewNear,
                                        x + cx, fCurY + fSharpCY, x, fCurY + fSharpCY,
@@ -2508,8 +1881,6 @@ void MainScreen::RenderText()
 {
     int iLines = 2;
     if ( m_bShowFPS ) iLines++;
-    if ( m_eGameMode == GameState::Learn ) iLines += 1;
-    else if ( m_InDevice.IsOpen() && m_bScored ) iLines += 1;
 
     // Screen info
     RECT rcStatus = { m_pRenderer->GetBufferWidth() - 156, 0, m_pRenderer->GetBufferWidth(), 6 + 16 * iLines };
@@ -2534,19 +1905,9 @@ void MainScreen::RenderText()
     unsigned iBkgColor = 0x40000000;
     m_pRenderer->DrawRect( static_cast< float >( rcStatus.left ), static_cast< float >( rcStatus.top ), 
         static_cast< float >( rcStatus.right - rcStatus.left ), static_cast< float >( rcStatus.bottom - rcStatus.top ), 0x80000000 );
-    if ( m_bZoomMove || m_bInstructions )
+    if ( m_bZoomMove )
         m_pRenderer->DrawRect( static_cast< float >( rcMsg.left ), static_cast< float >( rcMsg.top ), 
             static_cast< float >( rcMsg.right - rcMsg.left ), static_cast< float >( rcMsg.bottom - rcMsg.top ), iBkgColor );
-    else if ( m_iShowTop10 >= 0 )
-    {
-        m_pRenderer->DrawRect( static_cast< float >( rcTop10.left ), static_cast< float >( rcTop10.top ), 
-            static_cast< float >( rcTop10.right - rcTop10.left ), static_cast< float >( rcTop10.bottom - rcTop10.top ), iBkgColor );
-        m_pRenderer->DrawRect( static_cast< float >( xOffset ), static_cast< float >( rcTop10.top + 76 ), 
-            static_cast< float >( pColBorders[iCols] ), 1.0f, 0x00FFFFFF );
-        if ( m_iShowTop10 < 10 )
-            m_pRenderer->DrawRect( static_cast< float >( xOffset ), static_cast< float >( rcTop10.top + 80 + m_iShowTop10 * 16 ), 
-                static_cast< float >( pColBorders[iCols] ), 15.0f, 0x0066FF66 );
-    }
 
     // Draw the text
     m_pRenderer->BeginText();
@@ -2554,16 +1915,8 @@ void MainScreen::RenderText()
     RenderStatus( &rcStatus );    
     if ( m_bZoomMove )
         RenderMessage( &rcMsg, TEXT( "- Left-click and drag to move the screen\n- Right-click and drag to zoom horizontally\n- Press Escape to abort changes\n- Press Ctrl+V to save changes" ) );
-    else if ( m_bInstructions && m_eGameMode == Play )
-        RenderMessage( &rcMsg, TEXT( "You will be scored. Good luck.\n\nPlay any note when ready." ) );
-    else if ( m_bInstructions && m_eGameMode == Learn )
-        RenderMessage( &rcMsg, TEXT( "This mode will teach you a song, one track at a time.\nIn Adaptive mode, poorly played sections repeat at a slower rate.\nIn Waiting mode, notes will pause and wait to be played.\n\nPlay any note when ready." ) );
-    else if ( m_iShowTop10 >= 0 )
-        RenderTop10( &rcTop10, pColBorders );
     else if ( m_tpMessage.IsAlive() )
         m_tpMessage.Render( m_pRenderer, 0.0f, 0.0f );
-    else if ( m_tpLongMessage.IsAlive() )
-        m_tpLongMessage.Render( m_pRenderer, 0.0f, 0.0f );
     
     m_pRenderer->EndText();
 }
@@ -2585,18 +1938,6 @@ void MainScreen::RenderStatus( LPRECT prcStatus )
     // Build the FPS text
     TCHAR sFPS[128];
     _stprintf_s( sFPS, TEXT( "%.1lf" ), m_dFPS );
-    
-    // Build the Scoring text
-    TCHAR sScore[128] = TEXT( "N/A" ), sMult[128] = TEXT( "" );
-    if ( m_InDevice.IsOpen() && m_bScored )
-    {
-        Util::CommaPrintf( sScore, m_Score.GetScore() );
-        _stprintf_s( sMult, TEXT( "x%d.%d" ), m_Score.GetMult() / 10, m_Score.GetMult() % 10 );
-    }
-
-    // Build the learning text
-    TCHAR sLearn[128] = TEXT( "All Tracks" ), *sMode = ( m_eLearnMode == GameState::Adaptive ? TEXT( "Adaptive" ) : TEXT( "Waiting" ) );
-    if ( m_iLearnOrdinal >= 0 ) _stprintf_s( sLearn, TEXT( "Track %d" ), m_iLearnOrdinal + 1 );
 
     // Display the text
     InflateRect( prcStatus, -6, -3 );
@@ -2616,114 +1957,6 @@ void MainScreen::RenderStatus( LPRECT prcStatus )
         OffsetRect( prcStatus, -2, -1 );
         m_pRenderer->DrawText( TEXT( "FPS:" ), Renderer::Small, prcStatus, 0, 0xFFFFFFFF );
         m_pRenderer->DrawText( sFPS, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
-    }
-
-    if ( m_eGameMode != GameState::Learn )
-    {
-        OffsetRect( prcStatus, 2, 16 + 1 );
-        m_pRenderer->DrawText( TEXT( "Score:" ), Renderer::Small, prcStatus, 0, 0xFF404040 );
-        m_pRenderer->DrawText( sScore, Renderer::Small, prcStatus, DT_RIGHT, 0xFF404040 );
-        OffsetRect( prcStatus, -2, -1 );
-        m_pRenderer->DrawText( TEXT( "Score:" ), Renderer::Small, prcStatus, 0, 0xFFFFFFFF );
-        m_pRenderer->DrawText( sScore, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
-
-        if ( m_InDevice.IsOpen() && m_bScored )
-        {
-            OffsetRect( prcStatus, 2, 16 + 1 );
-            m_pRenderer->DrawText( sMult, Renderer::Small, prcStatus, DT_RIGHT, 0xFF404040 );
-            OffsetRect( prcStatus, -2, -1 );
-            m_pRenderer->DrawText( sMult, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
-        }
-    }
-    else
-    {
-        OffsetRect( prcStatus, 2, 16 + 1 );
-        m_pRenderer->DrawText( TEXT( "Learning:" ), Renderer::Small, prcStatus, 0, 0xFF404040 );
-        m_pRenderer->DrawText( sLearn, Renderer::Small, prcStatus, DT_RIGHT, 0xFF404040 );
-        OffsetRect( prcStatus, -2, -1 );
-        m_pRenderer->DrawText( TEXT( "Learning:" ), Renderer::Small, prcStatus, 0, 0xFFFFFFFF );
-        m_pRenderer->DrawText( sLearn, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
-        OffsetRect( prcStatus, 2, 16 + 1 );
-        m_pRenderer->DrawText( sMode, Renderer::Small, prcStatus, DT_RIGHT, 0xFF404040 );
-        OffsetRect( prcStatus, -2, -1 );
-        m_pRenderer->DrawText( sMode, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
-    }
-}
-
-void MainScreen::RenderTop10( LPRECT prcTop10, int pColBorders[9] )
-{
-    if ( m_iShowTop10 < 0 ) return;
-
-    OffsetRect( prcTop10, 0, 4 );
-
-    OffsetRect( prcTop10, 2, 2 );
-    m_pRenderer->DrawText( TEXT( "Top 10" ), Renderer::Large, prcTop10, DT_CENTER | DT_SINGLELINE, 0xFF404040 );
-    OffsetRect( prcTop10, -2, -2 );
-    m_pRenderer->DrawText( TEXT( "Top 10" ), Renderer::Large, prcTop10, DT_CENTER | DT_SINGLELINE, 0xFFFFFFFF );
-    OffsetRect( prcTop10, 0, 37 );
-
-    //Define the header
-    TCHAR *pColumns[8] = { TEXT( "Rank" ), TEXT( "Score" ), TEXT( "Pct" ), TEXT( "Streak" ), TEXT( "Great" ), TEXT( "Good" ), TEXT( "OK" ), TEXT( "Date" ) };
-    int pFormats[8] = { DT_CENTER, DT_CENTER, DT_CENTER, DT_CENTER, DT_CENTER, DT_CENTER, DT_CENTER, DT_CENTER};
-    int iCols = sizeof( pColumns ) / sizeof( TCHAR* );
-    int xOffset = ( ( prcTop10->right - prcTop10->left ) - pColBorders[iCols] ) / 2;
-
-    //Draw the message
-    TCHAR *sMsg = TEXT( "You didn't make it. Practice!" );
-    if ( m_iShowTop10 < 1 &&  m_pFileInfo->top10_size() > 1 )
-        sMsg = TEXT( "First place! Awesome!" );
-    else if ( m_iShowTop10 < 3 &&  m_pFileInfo->top10_size() > 3 )
-        sMsg = TEXT( "You made the top 3! Congratulations!" );
-    else if ( m_iShowTop10 < 10 && ( m_pFileInfo->top10_size() > m_iShowTop10 + 1 || m_iShowTop10 == 9 || m_iShowTop10 == 0 ) )
-        sMsg = TEXT( "You made the top 10!" );
-    else if ( m_iShowTop10 < 10 )
-        sMsg = TEXT( "Last place..." );
-    OffsetRect( prcTop10, 1, 1 );
-    m_pRenderer->DrawText( sMsg, Renderer::Small, prcTop10, DT_CENTER | DT_SINGLELINE, 0xFF000000 );
-    OffsetRect( prcTop10, -1, -1 );
-    m_pRenderer->DrawText( sMsg, Renderer::Small, prcTop10, DT_CENTER | DT_SINGLELINE, 0xFFFF73FF );
-    OffsetRect( prcTop10, 0, 19 );
-
-    //Draw the header
-    for ( int i = 0; i < iCols; i++ )
-    {
-        RECT rcHdr = { pColBorders[i] + xOffset, prcTop10->top, pColBorders[i + 1] + xOffset };
-        OffsetRect( &rcHdr, 1, 1 );
-        m_pRenderer->DrawText( pColumns[i], Renderer::Small, &rcHdr, pFormats[i] | DT_NOCLIP, 0xFF404040 );
-        OffsetRect( &rcHdr, -1, -1 );
-        m_pRenderer->DrawText( pColumns[i], Renderer::Small, &rcHdr, pFormats[i] | DT_NOCLIP, 0xFFFFFFFF );
-    }
-    OffsetRect( prcTop10, 0, 20 );
-
-    TCHAR buf[128];
-    for ( int r = 0; r < m_pFileInfo->top10_size(); r++ )
-    {
-        int iTextColor = ( r == m_iShowTop10 ? 0xFF000000 : 0xFFFFFFFF );
-        int iBkgColor = ( r == m_iShowTop10 ? 0xFFFFFFFF : 0xFF404040 );
-        const PFAData::Score &dScore = m_pFileInfo->top10( r );
-        int iNotes = dScore.great() + dScore.good() + dScore.ok() + dScore.incorrect() + dScore.missed();
-        for ( int c = 0; c < iCols; c++ )
-        {
-            switch ( c )
-            {
-                case 0: _stprintf_s( buf, TEXT( "%d" ), r + 1 ); break;
-                case 1: Util::CommaPrintf( buf, dScore.score() ); break;
-                case 2: _stprintf_s( buf, TEXT( "%d%%" ), iNotes == 0 ? 0 :
-                            ( ( dScore.great() + dScore.good() + dScore.ok() ) * 100 ) / iNotes ); break;
-                case 3: Util::CommaPrintf( buf, dScore.goodstreak() ); break;
-                case 4: Util::CommaPrintf( buf, dScore.great() ); break;
-                case 5: Util::CommaPrintf( buf, dScore.good() ); break;
-                case 6: Util::CommaPrintf( buf, dScore.ok() ); break;
-                case 7: _stprintf_s( buf, TEXT( "%02d/%02d/%04d" ), ( dScore.date() / 100 ) % 100, dScore.date() % 100, dScore.date() / 10000 ); break;
-            }
-
-            RECT rcVal = { pColBorders[c] + xOffset, prcTop10->top, pColBorders[c + 1] + xOffset };
-            OffsetRect( prcTop10, 1, 1 );
-            m_pRenderer->DrawText( buf, Renderer::Small, &rcVal, pFormats[c] | DT_NOCLIP, iBkgColor );
-            OffsetRect( prcTop10, -1, -1 );
-            m_pRenderer->DrawText( buf, Renderer::Small, &rcVal, pFormats[c] | DT_NOCLIP, iTextColor );
-        }
-        OffsetRect( prcTop10, 0, 16 );
     }
 }
 
@@ -2760,98 +1993,4 @@ void TextPath::Render( Renderer *pRenderer, float xOffset, float yOffset )
     pRenderer->DrawText( m_sText, m_fFont, &rcPos, DT_CENTER | DT_NOCLIP, 0xFF000000 & m_iColor );
     OffsetRect( &rcPos, iShift, iShift );
     pRenderer->DrawText( m_sText, m_fFont, &rcPos, DT_CENTER | DT_NOCLIP, m_iColor );
-}
-
-const wchar_t *GameScore::MissedText = L"Missed!";
-const wchar_t *GameScore::IncorrectText = L"Wrong!";
-const wchar_t *GameScore::OkText = L"OK!";
-const wchar_t *GameScore::GoodText = L"Good!";
-const wchar_t *GameScore::GreatText = L"Great!";
-
-void GameScore::Missed()
-{
-    m_Score.set_score( m_Score.score() + MissedScore );
-    m_Score.set_missed( m_Score.missed() + 1 );
-    m_Score.clear_mult();
-    if ( m_Score.curstreak() <= 0 )
-        m_Score.set_curstreak( m_Score.curstreak() - 1 );
-    else
-        m_Score.set_curstreak( -1 );
-    m_Score.set_badstreak( max( m_Score.badstreak(), -m_Score.curstreak() ) );
-}
-
-void GameScore::Incorrect()
-{
-    m_Score.set_score( m_Score.score() + IncorrectScore );
-    m_Score.set_incorrect( m_Score.incorrect() + 1 );
-    m_Score.clear_mult();
-    if ( m_Score.curstreak() <= 0 )
-        m_Score.set_curstreak( m_Score.curstreak() - 1 );
-    else
-        m_Score.set_curstreak( -1 );
-    m_Score.set_badstreak( max( m_Score.badstreak(), -m_Score.curstreak() ) );
-}
-
-MIDIChannelEvent::InputQuality GameScore::HitQuality( long long llError, double dSpeed )
-{
-    llError = abs( llError );
-    if ( llError <= static_cast< long long >( GreatTime * dSpeed ) ) return MIDIChannelEvent::Great;
-    else if ( llError <= static_cast< long long >( GoodTime * dSpeed ) )  return MIDIChannelEvent::Good;
-    else if ( llError <= static_cast< long long >( OkTime * dSpeed ) ) return MIDIChannelEvent::Ok;
-    else return MIDIChannelEvent::Missed;
-}
-
-void GameScore::Hit( MIDIChannelEvent::InputQuality eHitQuality )
-{
-    switch ( eHitQuality )
-    {
-        case MIDIChannelEvent::Great:
-            m_Score.set_score( m_Score.score() + ( GreatScore * m_Score.mult() ) / 10 );
-            m_Score.set_great( m_Score.great() + 1 );
-            break;
-        case MIDIChannelEvent::Good:
-            m_Score.set_score( m_Score.score() + ( GoodScore * m_Score.mult() ) / 10 );
-            m_Score.set_good( m_Score.good() + 1 );
-            break;
-        case MIDIChannelEvent::Ok:
-            m_Score.set_score( m_Score.score() + ( OkScore * m_Score.mult() ) / 10 );
-            m_Score.set_ok( m_Score.ok() + 1 );
-            break;
-        default:
-            Incorrect();
-            return;
-    }
-
-    m_Score.set_mult( min( m_Score.mult() + 1, 80 ) );
-
-    if ( m_Score.curstreak() >= 0 )
-        m_Score.set_curstreak( m_Score.curstreak() + 1 );
-    else
-        m_Score.set_curstreak( 1 );
-    m_Score.set_goodstreak( max( m_Score.goodstreak(), m_Score.curstreak() ) );
-
-    return;
-}
-
-int GameScore::AddToTop10( PFAData::FileInfo *pFileInfo )
-{
-    if ( !m_Score.has_score() ) return -1;
-
-    int iPos = pFileInfo->top10_size();
-    PFAData::Score *pScore = pFileInfo->add_top10();
-    pScore->CopyFrom( m_Score );
-
-    SYSTEMTIME st;
-    GetSystemTime( &st );
-    pScore->set_date( st.wYear * 10000 + st.wMonth * 100 + st.wDay );
-
-    while ( iPos > 0 && pFileInfo->top10( iPos - 1 ).score() < m_Score.score() )
-    {
-        pFileInfo->mutable_top10()->SwapElements( iPos, iPos - 1 );
-        iPos--;
-    }
-
-    if ( pFileInfo->top10_size() > 10 )
-        pFileInfo->mutable_top10()->RemoveLast();
-    return iPos;
 }
