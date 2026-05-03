@@ -452,13 +452,13 @@ void MIDI::PostProcess( vector< MIDIEvent* > *vEvents )
 
 void MIDI::ConnectNotes()
 {
-    const int StackSize = 10;
-    int pSize[16][128];
-    MIDIChannelEvent *pStacks[16][128][StackSize];
+    std::vector<MIDIChannelEvent*> pStacks[16 * 128];
 
     for ( vector< MIDITrack* >::iterator itTrack = m_vTracks.begin(); itTrack != m_vTracks.end(); ++itTrack )
     {
-        memset( pSize, 0, sizeof( pSize ) );
+		for (unsigned int i = 0; i < (16 * 128); i++)
+			pStacks[i].clear();
+
         vector< MIDIEvent* > &vEvents = ( *itTrack )->m_vEvents;
         int iEvents = (int)vEvents.size();
         for ( int i = 0; i < iEvents; i++ )
@@ -469,37 +469,23 @@ void MIDI::ConnectNotes()
                 int iChannel = pEvent->GetChannel();
                 int iNote = pEvent->GetParam1();
                 int iVelocity = pEvent->GetParam2();
+
+				int iStack = iChannel + (iNote << 4);
+
+				auto& stack = pStacks[iStack];
                 
                 if ( eEventType == MIDIChannelEvent::NoteOn && iVelocity > 0 )
                 {
-                    int &iSize = pSize[iChannel][iNote];
-                    if ( iSize < StackSize ) pStacks[iChannel][iNote][iSize] = pEvent;
-                    iSize++;
+					stack.push_back(pEvent);
                 }
                 else if ( eEventType == MIDIChannelEvent::NoteOff || eEventType == MIDIChannelEvent::NoteOn )
                 {
-                    int &iSize = pSize[iChannel][iNote];
-                    if ( iSize > 0 )
-                    {
-                        if ( iSize <= StackSize ) pStacks[iChannel][iNote][iSize - 1]->SetSister( pEvent );
-                        else // Should never get here
-                        {
-                            int j = i - 1;
-                            while ( j >= 0 && !pEvent->GetSister() )
-                            {
-                                if ( vEvents[j]->GetEventType() == MIDIEvent::ChannelEvent )
-                                {
-                                    MIDIChannelEvent *pSister = reinterpret_cast< MIDIChannelEvent* >( vEvents[j] );
-                                    if ( !pSister->GetSister() &&
-                                         pSister->GetChannelEventType() == MIDIChannelEvent::NoteOn && 
-                                         pSister->GetParam1() == iNote && pSister->GetParam2() > 0 )
-                                        pEvent->SetSister( pSister );
-                                }
-                                j--;
-                            }
-                        }
-                        iSize--;
-                    }
+					if(!stack.empty())
+					{
+						MIDIChannelEvent* pStackedNote = stack.back();
+						stack.pop_back();
+						pStackedNote->SetSister(pEvent);
+					}
                 }
             }
     }
