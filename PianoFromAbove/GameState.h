@@ -238,9 +238,12 @@ private:
     eventvec_t m_vProgramChange; // Tracked so we don't jump over them during random access
     eventvec_t m_vTempo; // Tracked for drawing measure lines
     eventvec_t m_vSignature; // Measure lines again
+	eventvec_t m_vSysEx; // SysEx playback
     eventvec_t::const_iterator m_itNextProgramChange;
     eventvec_t::const_iterator m_itNextTempo;
     eventvec_t::const_iterator m_itNextSignature;
+    eventvec_t::const_iterator m_itNextSysEx;
+	MIDIMetaEvent* m_pUnplayedSysEx;
     int m_iMicroSecsPerBeat, m_iLastTempoTick; // Tempo
     long long m_llLastTempoTime; // Tempo
     int m_iBeatsPerMeasure, m_iBeatType, m_iClocksPerMet, m_iLastSignatureTick; // Time signature

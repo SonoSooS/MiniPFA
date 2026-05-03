@@ -759,6 +759,8 @@ int MIDISysExEvent::ParseEvent( const unsigned char *pcData, int iMaxSize )
 {
     if ( iMaxSize < 1 ) return 0;
 
+	m_eMetaEventType = SysEx;
+
     // Parse the code and the length
     int iCount = MIDI::ParseVarNum( pcData, iMaxSize, &m_iDataLen );
     if ( iCount == 0 || iMaxSize < iCount + m_iDataLen ) return 0;

@@ -239,7 +239,8 @@ public:
 
     enum MetaEventType { SequenceNumber, TextEvent, Copyright, SequenceName, InstrumentName, Lyric, Marker,
                          CuePoint, ChannelPrefix = 0x20, PortPrefix = 0x21, EndOfTrack = 0x2F, SetTempo = 0x51,
-                         SMPTEOffset = 0x54, TimeSignature = 0x58, KeySignature = 0x59, Proprietary = 0x7F };
+                         SMPTEOffset = 0x54, TimeSignature = 0x58, KeySignature = 0x59, Proprietary = 0x7F,
+						 SysEx = 0xF0 };
     int ParseEvent( const unsigned char *pcData, int iMaxSize );
 
     //Accessors
@@ -247,25 +248,23 @@ public:
     int GetDataLen() const { return m_iDataLen; }
     unsigned char *GetData() const { return m_pcData; }
 
-private:
+protected:
     MetaEventType m_eMetaEventType;
     int m_iDataLen;
     unsigned char *m_pcData;
 };
 
 //SysEx Event: probably to be ignored
-class MIDISysExEvent : public MIDIEvent
+class MIDISysExEvent : public MIDIMetaEvent
 {
 public:
-    MIDISysExEvent() : m_pcData( 0 ) { }
-    ~MIDISysExEvent() { if ( m_pcData ) delete[] m_pcData; }
+	MIDISysExEvent() {}
+    ~MIDISysExEvent() {}
 
     int ParseEvent( const unsigned char *pcData, int iMaxSize );
 
-private:
+public:
     int m_iSysExCode;
-    int m_iDataLen;
-    unsigned char *m_pcData;
     bool m_bHasMoreData;
     MIDISysExEvent *prevEvent;
 };

@@ -501,7 +501,7 @@ float SplashScreen::GetNoteX( int iNote )
 //-----------------------------------------------------------------------------
 
 MainScreen::MainScreen( wstring sMIDIFile, State eGameMode, HWND hWnd, Renderer *pRenderer ) :
-    GameState( hWnd, pRenderer ), m_MIDI( sMIDIFile ), m_eGameMode( eGameMode )
+    GameState( hWnd, pRenderer ), m_MIDI( sMIDIFile ), m_eGameMode( eGameMode ), m_pUnplayedSysEx(NULL)
 {
     // Finish off midi processing
     if ( !m_MIDI.IsValid() ) return;
@@ -555,6 +555,12 @@ void MainScreen::InitNoteMap( const vector< MIDIEvent* > &vEvents )
             else if ( eEventType == MIDIMetaEvent::TimeSignature )
                 m_vSignature.push_back( pair< long long, int >( pEvent->GetAbsMicroSec(), m_vMetaEvents.size() - 1 ) );
         }
+		else if((*it)->GetEventType() == MIDIEvent::SysExEvent)
+		{
+			MIDIMetaEvent *pEvent = reinterpret_cast< MIDISysExEvent* >(*it);
+			m_vMetaEvents.push_back(pEvent);
+			m_vSysEx.push_back(pair< long long, int >(pEvent->GetAbsMicroSec(), m_vMetaEvents.size() - 1));
+		}
 }
 
 // Display colors
@@ -1262,6 +1268,14 @@ void MainScreen::AdvanceIterators( long long llTime, bool bIsJump )
             m_iClocksPerMet = 24;
             m_iLastSignatureTick = 0;
         }
+        
+        m_itNextSysEx = upper_bound( m_vSysEx.begin(), m_vSysEx.end(), pair< long long, int >( llTime, m_vMetaEvents.size() ) );
+        pPrevious = GetPrevious( m_itNextSysEx, m_vSysEx, 0 );
+        if ( pPrevious )
+        {
+			if(!m_OutDevice.PlayEvent(pPrevious))
+				m_pUnplayedSysEx = pPrevious;
+        }
 
         m_iNextBeatTick = GetBeatTick( GetCurrentTick( llTime ), m_iBeatType, m_iLastSignatureTick );
         m_iNextMetTick = GetMetTick( GetCurrentTick( llTime ), m_iClocksPerMet, m_iLastSignatureTick );
@@ -1291,6 +1305,23 @@ void MainScreen::AdvanceIterators( long long llTime, bool bIsJump )
                 m_iLastSignatureTick = pEvent->GetAbsT();
             }
         }
+
+		if(m_pUnplayedSysEx)
+		{
+			if(m_OutDevice.PlayEvent(m_pUnplayedSysEx));
+				m_pUnplayedSysEx = NULL;
+		}
+
+		if(!m_pUnplayedSysEx)
+        for ( ; m_itNextSysEx != m_vSysEx.end() && m_itNextSysEx->first <= llTime; ++m_itNextSysEx )
+        {
+            MIDIMetaEvent *pEvent = m_vMetaEvents[m_itNextSysEx->second];
+			if(!m_OutDevice.PlayEvent(pEvent))
+			{
+				m_pUnplayedSysEx = pEvent;
+				break;
+			}
+        }
     }
 }
 
@@ -1302,11 +1333,14 @@ MIDIMetaEvent* MainScreen::GetPrevious( eventvec_t::const_iterator &itCurrent,
     eventvec_t::const_iterator it = itCurrent;
     if ( itCurrent != vEventMap.begin() )
     {
-        while ( it != vEventMap.begin() )
-            if ( m_vMetaEvents[( --it )->second]->GetDataLen() == iDataLen )
-                return m_vMetaEvents[it->second];
+		while(it != vEventMap.begin())
+		{
+			--it;
+			if(!iDataLen || m_vMetaEvents[it->second]->GetDataLen() == iDataLen)
+				return m_vMetaEvents[it->second];
+		}
     }
-    else if ( vEventMap.size() > 0 && itCurrent->first <= mInfo.llFirstNote && m_vMetaEvents[itCurrent->second]->GetDataLen() == iDataLen )
+    else if ( vEventMap.size() > 0 && itCurrent->first <= mInfo.llFirstNote && (!iDataLen || m_vMetaEvents[itCurrent->second]->GetDataLen() == iDataLen) )
     {
         MIDIMetaEvent *pPrevious = m_vMetaEvents[itCurrent->second];
         ++itCurrent;
