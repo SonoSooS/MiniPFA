@@ -61,7 +61,7 @@ LRESULT WINAPI WndProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
                     ofn.lpstrTitle = TEXT( "Please select a song to play" );
                     ofn.Flags = OFN_EXPLORER | OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
                     if ( GetOpenFileName( &ofn ) )
-                        PlayFile( sFilename, ePlayMode, iId == ID_FILE_PRACTICESONGCUSTOM, true );
+                        PlayFile( sFilename, ePlayMode, iId == ID_FILE_PRACTICESONGCUSTOM );
                     return 0;
                 }
                 case ID_FILE_CLOSEFILE:
@@ -1096,7 +1096,7 @@ VOID SetPlayPauseStop( BOOL bPlay, BOOL bPause, BOOL bStop )
     SendMessage( hWndToolbar, TB_PRESSBUTTON, ID_PLAY_STOP, bStop );
 }
 
-BOOL PlayFile( const wstring &sFile, int ePlayMode, bool bCustomSettings, bool bLibraryEligible )
+BOOL PlayFile( const wstring &sFile, int ePlayMode, bool bCustomSettings )
 {
     Config &config = Config::GetConfig();
     const VisualSettings &cVisual = config.GetVisualSettings();

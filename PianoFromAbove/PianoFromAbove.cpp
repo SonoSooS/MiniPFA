@@ -39,6 +39,17 @@ TSQueue< MSG > g_MsgQueue; // Producer/consumer to hold events for our game thre
 //-----------------------------------------------------------------------------
 INT WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpszCmdLine, INT nCmdShow )
 {
+	char asd[256];
+	sprintf_s(asd, "sizes:\r\n"
+		"- MIDIEvent: %llu\r\n"
+		"- MIDIChannelEvent: %llu\r\n"
+		"- MIDIMetaEvent: %llu\r\n"
+		"- MIDISysExEvent: %llu",
+		sizeof(MIDIEvent), sizeof(MIDIChannelEvent), sizeof(MIDIMetaEvent), sizeof(MIDISysExEvent));
+	//MessageBoxA(NULL, asd, "", MB_OK);
+
+	//return 0;
+
     g_hInstance = hInstance;
     srand( ( unsigned )time( NULL ) );
 

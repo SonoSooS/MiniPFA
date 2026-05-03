@@ -227,7 +227,6 @@ private:
     void RenderBorder();
     void RenderText();
     void RenderStatus( LPRECT prcPos );
-    void RenderTop10( LPRECT prcTop10, int pColBorders[9] );
     void RenderMessage( LPRECT prcMsg, TCHAR *sMsg );
 
     // MIDI info

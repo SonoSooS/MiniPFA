@@ -150,10 +150,11 @@ MIDI::MIDI ( const wstring &sFilename )
     ifs.read( reinterpret_cast< char* >( pcMemBlock ), iSize );
     ifs.close();
 
+	//TODO: MapViewOfFile + parse each track separately for memory efficiency
+
     // Parse it
     int iTotal = ParseMIDI ( pcMemBlock, iSize );
     m_Info.sFilename = sFilename;
-    Util::MD5( pcMemBlock, iSize, m_Info.sMd5 );
  
     // Clean up
     delete[] pcMemBlock;
@@ -554,7 +555,13 @@ int MIDITrack::ParseEvents( const unsigned char *pcData, int iMaxSize, int iTrac
         iDTCode = MIDIEvent::MakeNextEvent( pcData + iTotal, iMaxSize - iTotal, iTrack, &pEvent );
         if ( iDTCode > 0 )
         {
-            iCount = pEvent->ParseEvent( pcData + iDTCode + iTotal, iMaxSize - iDTCode - iTotal );
+			switch (pEvent->GetEventType())
+			{
+			case MIDIEvent::ChannelEvent: iCount = ((MIDIChannelEvent*)pEvent)->ParseEvent(pcData + iDTCode + iTotal, iMaxSize - iDTCode - iTotal); break;
+			case MIDIEvent::MetaEvent:    iCount = ((MIDIMetaEvent*)pEvent)   ->ParseEvent(pcData + iDTCode + iTotal, iMaxSize - iDTCode - iTotal); break;
+			case MIDIEvent::SysExEvent:   iCount = ((MIDISysExEvent*)pEvent)  ->ParseEvent(pcData + iDTCode + iTotal, iMaxSize - iDTCode - iTotal); break;
+			}
+
             if ( iCount > 0 )
             {
                 iTotal += iDTCode + iCount;
@@ -697,7 +704,6 @@ int MIDIEvent::MakeNextEvent( const unsigned char *pcData, int iMaxSize, int iTr
     (*pOutEvent)->m_eEventType = eEventType;
     (*pOutEvent)->m_iEventCode = iEventCode;
     (*pOutEvent)->m_iTrack = iTrack;
-    (*pOutEvent)->m_iDT = iDT;
     (*pOutEvent)->m_iAbsT = iDT;
     if ( pPrevEvent ) (*pOutEvent)->m_iAbsT += pPrevEvent->m_iAbsT;
 

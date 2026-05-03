@@ -26,7 +26,6 @@ class MIDISysExEvent;
 class MIDIPos;
 
 class MIDIDevice;
-class MIDIInDevice;
 class MIDIOutDevice;
 
 //
@@ -111,7 +110,6 @@ public:
         void AddTrackInfo( const MIDITrack &mTrack);
 
         wstring sFilename;
-        string sMd5;
         int iFormatType;
         int iNumTracks, iNumChannels;
         int iDivision;
@@ -181,27 +179,24 @@ class MIDIEvent
 {
 public:
     //Event types
-    enum EventType { ChannelEvent, MetaEvent, SysExEvent, RunningStatus };
+    enum EventType : unsigned char { ChannelEvent, MetaEvent, SysExEvent, RunningStatus };
     static EventType DecodeEventType( int iEventCode );
 
     //Parsing functions that load data into the instance
     static int MakeNextEvent( const unsigned char *pcData, int iMaxSize, int iTrack, MIDIEvent **pOutEvent );
-    virtual int ParseEvent( const unsigned char *pcData, int iMaxSize ) = 0;
 
     //Accessors
     EventType GetEventType() const { return m_eEventType; }
     int GetEventCode() const { return m_iEventCode; }
     int GetTrack() const { return m_iTrack; }
-    int GetDT() const { return m_iDT; }
     int GetAbsT() const { return m_iAbsT; }
     long long GetAbsMicroSec() const { return m_llAbsMicroSec; }
     void SetAbsMicroSec( long long llAbsMicroSec ) { m_llAbsMicroSec = llAbsMicroSec; }
 
 protected:
     EventType m_eEventType;
-    int m_iEventCode;
-    int m_iTrack;
-    int m_iDT;
+    unsigned char m_iEventCode;
+    unsigned short m_iTrack;
     int m_iAbsT;
     long long m_llAbsMicroSec;
 };
@@ -212,7 +207,7 @@ class MIDIChannelEvent : public MIDIEvent
 public:
     MIDIChannelEvent() : m_pSister( NULL ), m_iSimultaneous( 0 ) { }
 
-    enum ChannelEventType { NoteOff = 0x8, NoteOn, NoteAftertouch, Controller, ProgramChange, ChannelAftertouch, PitchBend };
+    enum ChannelEventType : unsigned char { NoteOff = 0x8, NoteOn, NoteAftertouch, Controller, ProgramChange, ChannelAftertouch, PitchBend };
     int ParseEvent( const unsigned char *pcData, int iMaxSize );
 
     //Accessors
@@ -227,11 +222,11 @@ public:
     void SetSimultaneous( int iSimultaneous ) { m_iSimultaneous = iSimultaneous; }
 
 private:
+	MIDIChannelEvent *m_pSister;
     ChannelEventType m_eChannelEventType;
     unsigned char m_cChannel;
     unsigned char m_cParam1;
     unsigned char m_cParam2;
-    MIDIChannelEvent *m_pSister;
     int m_iSimultaneous;
 };
 

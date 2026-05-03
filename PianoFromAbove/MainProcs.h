@@ -50,5 +50,5 @@ VOID SetMetronome( INT iMetronome );
 VOID SetPlayable( BOOL bPlayable );
 VOID SetPlayMode( INT ePlayMode );
 VOID SetPlayPauseStop( BOOL bPlay, BOOL bPause, BOOL bStop );
-BOOL PlayFile( const wstring &sFile, int ePlayMode, bool bCustomSettings = false, bool bLibraryEligible = false );
+BOOL PlayFile( const wstring &sFile, int ePlayMode, bool bCustomSettings = false );
 VOID CheckActivity( BOOL bIsActive, POINT *ptNew = NULL, BOOL bToggleEnable = false );
