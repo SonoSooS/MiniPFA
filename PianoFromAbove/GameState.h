@@ -288,6 +288,7 @@ private:
     ChannelSettings m_csBackground;
     ChannelSettings m_csKBRed, m_csKBWhite, m_csKBSharp, m_csKBBackground;
     vector< TrackSettings > m_vTrackSettings;
+    int m_NumNotesRendered;
 
     float m_fZoomX, m_fOffsetX, m_fOffsetY;
     float m_fTempZoomX, m_fTempOffsetX, m_fTempOffsetY;

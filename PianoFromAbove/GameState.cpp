@@ -1542,6 +1542,8 @@ void MainScreen::RenderLines()
 
 void MainScreen::RenderNotes()
 {
+    m_NumNotesRendered = 0;
+    
     // Do we have any notes to render?
     if ( m_iEndPos < 0 || m_iStartPos >= static_cast< int >( m_vEvents.size() ) )
         return;
@@ -1623,6 +1625,8 @@ void MainScreen::RenderNote( int iPos )
         cy -= ( fMinY - ( y - cy ) );
         y = fMinY + cy;
     }
+    
+    ++m_NumNotesRendered;
 
     // Visualize!
     int iAlpha = ( 0 ) << 24;
@@ -1879,8 +1883,8 @@ void MainScreen::RenderBorder()
 
 void MainScreen::RenderText()
 {
-    int iLines = 2;
-    if ( m_bShowFPS ) iLines++;
+    int iLines = 1;
+    if ( m_bShowFPS ) iLines += 2;
 
     // Screen info
     RECT rcStatus = { m_pRenderer->GetBufferWidth() - 156, 0, m_pRenderer->GetBufferWidth(), 6 + 16 * iLines };
@@ -1938,6 +1942,9 @@ void MainScreen::RenderStatus( LPRECT prcStatus )
     // Build the FPS text
     TCHAR sFPS[128];
     _stprintf_s( sFPS, TEXT( "%.1lf" ), m_dFPS );
+    
+	TCHAR sNOS[128];
+	_stprintf_s(sNOS, TEXT("%llu"), m_NumNotesRendered);
 
     // Display the text
     InflateRect( prcStatus, -6, -3 );
@@ -1957,6 +1964,13 @@ void MainScreen::RenderStatus( LPRECT prcStatus )
         OffsetRect( prcStatus, -2, -1 );
         m_pRenderer->DrawText( TEXT( "FPS:" ), Renderer::Small, prcStatus, 0, 0xFFFFFFFF );
         m_pRenderer->DrawText( sFPS, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF );
+        
+		OffsetRect(prcStatus, 2, 16 + 1);
+		m_pRenderer->DrawText(TEXT("NoS:"), Renderer::Small, prcStatus, 0, 0xFF404040);
+		m_pRenderer->DrawText(sNOS, Renderer::Small, prcStatus, DT_RIGHT, 0xFF404040);
+		OffsetRect(prcStatus, -2, -1);
+		m_pRenderer->DrawText(TEXT("NoS:"), Renderer::Small, prcStatus, 0, 0xFFFFFFFF);
+		m_pRenderer->DrawText(sNOS, Renderer::Small, prcStatus, DT_RIGHT, 0xFFFFFFFF);
     }
 }
 
