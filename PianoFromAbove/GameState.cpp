@@ -1057,19 +1057,49 @@ void MainScreen::UpdateState( int iPos )
     }
     else
     {
+        // Pre-erase note state
         m_pNoteState[iNote] = -1;
+        
         MIDIChannelEvent *pSearch = pEvent->GetSister();
         // linear search and erase. No biggie given N is number of simultaneous notes being played
-        vector< int >::iterator it = m_vState.begin();
-        while ( it != m_vState.end() )
+        vector<int>::reverse_iterator it = m_vState.rbegin();
+        while ( it != m_vState.rend() )
         {
-            if ( m_vEvents[*it] == pSearch )
-                it = m_vState.erase( it );
+			int iEvent = *it;
+			MIDIChannelEvent* pSearchEvent = m_vEvents[iEvent];
+
+            if ( pSearchEvent == pSearch )
+			{
+                // if only reverse_iterator could do this...
+                //it = m_vState.erase( it );
+
+				// Absolutely disgusting
+				{
+					auto del_it = (it + 1);
+					auto res_it = m_vState.erase(del_it.base());
+					it = vector<int>::reverse_iterator((res_it));
+				}
+                
+                // Break out if there is already a note found to replace this one
+				if(m_pNoteState[iNote] != -1)
+					break;
+				
+                // Do not find anything anymore
+				pSearch = nullptr;
+			}
             else
             {
-                if ( it != m_vState.end() && m_vEvents[*it]->GetParam1() == iNote )
-                    m_pNoteState[iNote] = *it;
-                ++it;
+				if(pSearchEvent->GetParam1() == iNote)
+				{
+                    // Find top-most note as the active one
+					m_pNoteState[iNote] = iEvent;
+                    
+                    // Nothing to find anymore, break out
+					if(!pSearch)
+						break;
+				}
+                
+				++it;
             }
         }
     }
