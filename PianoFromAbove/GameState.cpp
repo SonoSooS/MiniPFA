@@ -822,6 +822,13 @@ GameState::GameError MainScreen::MsgProc( HWND hWnd, UINT msg, WPARAM wParam, LP
                 case 'M':
                     cPlayback.ToggleMute( true );
                     return Success;
+                case 'P':
+				{
+					VideoSettings vs = config.GetVideoSettings();
+					vs.bLimitFPS ^= true;
+					config.SetVideoSettings(vs);
+					return Success;
+				}
                 case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': case '0':
                     if ( m_eGameMode != Practice || bAlt ) return Success;
                     ChannelSettings *pSettings = GetChannelSettings( wParam == '0' ? 9 : (int)wParam - '1' );
