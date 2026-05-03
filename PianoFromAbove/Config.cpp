@@ -142,6 +142,7 @@ void VisualSettings::LoadDefaultValues()
 void AudioSettings::LoadDefaultValues()
 {
     this->iOutDevice = -1;
+	this->KDMPath = L"";
     LoadMIDIDevices();
 }
 
@@ -193,10 +194,14 @@ void AudioSettings::LoadMIDIDevices()
     this->iOutDevice = -1;
     this->vMIDIOutDevices.clear();
     int iNumOutDevs = midiOutGetNumDevs();
-    for ( int i = 0; i < iNumOutDevs; i++ )
+
+	MIDIOutDevice::SetKDMPath(this->KDMPath);
+
+	this->vMIDIOutDevices.push_back(L"*KDMAPI*");
+    for ( int i = 1; i <= iNumOutDevs; i++ )
     {
-        MIDIOUTCAPS moc;
-        midiOutGetDevCaps( i, &moc, sizeof( MIDIOUTCAPS ) );
+        MIDIOUTCAPSW moc;
+        midiOutGetDevCapsW( i - 1, &moc, sizeof( MIDIOUTCAPSW ) );
         this->vMIDIOutDevices.push_back( moc.szPname );
 
         if ( this->sDesiredOut == this->vMIDIOutDevices[i] )
@@ -205,7 +210,7 @@ void AudioSettings::LoadMIDIDevices()
             this->iOutDevice = i;
     }
     if ( this->iOutDevice < 0 )
-        this->iOutDevice = iNumOutDevs - 1;
+        this->iOutDevice = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -261,6 +266,13 @@ void AudioSettings::LoadConfigValues( TiXmlElement *txRoot )
             if ( this->vMIDIOutDevices[i] == this->sDesiredOut )
                 this->iOutDevice = (int)i;
     }
+
+	string sKDMPath;
+	if (txAudio->QueryStringAttribute("KDMAPI_DLL", &sKDMPath) == TIXML_SUCCESS)
+	{
+		this->KDMPath = Util::StringToWstring(sKDMPath);
+		MIDIOutDevice::SetKDMPath(this->KDMPath);
+	}
 }
 
 void VideoSettings::LoadConfigValues( TiXmlElement *txRoot )
@@ -374,6 +386,9 @@ bool AudioSettings::SaveConfigValues( TiXmlElement *txRoot )
     if ( this->sDesiredOut.length() > 0 )
         txAudio->SetAttribute( "MIDIOutDevice", Util::WstringToString( this->sDesiredOut ) );
 
+	if(!this->KDMPath.empty())
+		txAudio->SetAttribute("KDMAPI_DLL", Util::WstringToString(this->KDMPath));
+
     return true;
 }
 
@@ -434,3 +449,4 @@ bool ViewSettings::SaveConfigValues( TiXmlElement *txRoot )
     txView->SetAttribute( "MainHeight", m_iMainHeight );
     return true;
 }
+

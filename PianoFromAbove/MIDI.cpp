@@ -847,18 +847,39 @@ int MIDI::ParseNChars( const unsigned char *pcData, int iNChars, int iMaxSize, c
 // Device classes
 //-----------------------------------------------------------------------------
 
+wstring MIDIOutDevice::s_KDMPath;
+void MIDIOutDevice::SetKDMPath(const wstring &path)
+{
+	s_KDMPath = path;
+}
+
 // Port management functions
 int MIDIOutDevice::GetNumDevs() const
 {
-    return midiOutGetNumDevs();
+    return midiOutGetNumDevs() + 1;
 }
 
 wstring MIDIOutDevice::GetDevName( int iDev ) const
 {
-    MIDIOUTCAPS moc;
-    if ( midiOutGetDevCaps( iDev, &moc, sizeof( MIDIOUTCAPS ) ) == MMSYSERR_NOERROR )
-        return moc.szPname;
+	if (iDev == 0)
+	{
+		return L"*KDMAPI*";
+	}
+	else
+		--iDev;
+
+	{
+		MIDIOUTCAPS moc;
+		if (midiOutGetDevCaps(iDev, &moc, sizeof(MIDIOUTCAPS)) == MMSYSERR_NOERROR)
+			return moc.szPname;
+	}
+
     return wstring();
+}
+
+MMRESULT MIDIOutDevice::KDMShortMsg(HMIDIOUT hmo, DWORD dwMsg)
+{
+	return ((MIDIOutDevice*)hmo)->m_pfnKShortMsg(dwMsg);
 }
 
 bool MIDIOutDevice::Open( int iDev )
@@ -867,7 +888,50 @@ bool MIDIOutDevice::Open( int iDev )
     m_iDevice = iDev;
     m_sDevice = GetDevName( iDev );
 
-    MMRESULT mmResult = midiOutOpen( &m_hMIDIOut, iDev, ( DWORD_PTR )MIDIOutProc, ( DWORD_PTR )this, CALLBACK_FUNCTION );
+	if (iDev == 0)
+	{
+		if (s_KDMPath.empty())
+			return false;
+
+		HMODULE hm = LoadLibraryW(s_KDMPath.c_str());
+		if (!hm)
+			return false;
+
+		FARPROC ret;
+		
+		ret = GetProcAddress(hm, "SendDirectData");
+		if(!ret)
+			goto cleanup;
+		m_pfnKShortMsg = (kShortMsg)ret;
+		ret = GetProcAddress(hm, "SendDirectLongData");
+		m_pfnKLongMsg = (kLongMsg)ret;
+
+		if (!ret)
+			goto cleanup;
+		if (!m_pfnKShortMsg)
+			goto cleanup;
+
+		pfnBoolFunc pBoolFunc;
+		pBoolFunc = (pfnBoolFunc)GetProcAddress(hm, "IsKDMAPIAvailable");
+		if (!pBoolFunc || !pBoolFunc())
+			goto cleanup;
+		pBoolFunc = (pfnBoolFunc)GetProcAddress(hm, "InitializeKDMAPIStream");
+		if (!pBoolFunc || !pBoolFunc())
+			goto cleanup;
+
+		m_hmKDM = hm;
+		m_bIsOpen = true;
+		m_hMIDIOut = (HMIDIOUT)this;
+		return true;
+
+	cleanup:
+		FreeLibrary(hm);
+		return false;
+	}
+	else
+		--iDev;
+
+    MMRESULT mmResult = midiOutOpen( &m_hMIDIOut, iDev, 0, 0, CALLBACK_NULL );
     m_bIsOpen = ( mmResult == MMSYSERR_NOERROR );
     return m_bIsOpen;
 }
@@ -876,8 +940,30 @@ void MIDIOutDevice::Close()
 {
     if ( !m_bIsOpen ) return;
 
-    midiOutReset( m_hMIDIOut );
-    midiOutClose( m_hMIDIOut );
+	if (m_hmKDM)
+	{
+		FARPROC ret = GetProcAddress(m_hmKDM, "TerminateKDMAPIStream");
+		if(ret)
+		{
+			pfnBoolFunc pBoolFunc;
+			pBoolFunc = (pfnBoolFunc)ret;
+			if (!pBoolFunc || !pBoolFunc())
+			{
+				// whatever?
+			}
+		}
+
+		FreeLibrary(m_hmKDM);
+		m_hmKDM = NULL;
+	}
+	else
+	{
+		midiOutReset(m_hMIDIOut);
+		midiOutClose(m_hMIDIOut);
+	}
+
+	m_pfnKShortMsg = NULL;
+	m_pfnKLongMsg = NULL;
     m_bIsOpen = false;
 }
 
@@ -897,7 +983,8 @@ void MIDIOutDevice::AllNotesOff( const vector< int > &vChannels )
 void MIDIOutDevice::SetVolume( double dVolume )
 {
     DWORD dwVolume = static_cast< DWORD >( 0xFFFF * dVolume + 0.5 );
-    midiOutSetVolume( m_hMIDIOut, dwVolume | ( dwVolume << 16 ) );
+	if(!m_hmKDM)
+		midiOutSetVolume( m_hMIDIOut, dwVolume | ( dwVolume << 16 ) );
 }
 
 // Play events
@@ -927,8 +1014,99 @@ bool MIDIOutDevice::PlayEventAcrossChannels( unsigned char cStatus, unsigned cha
 
 bool MIDIOutDevice::PlayEvent( unsigned char cStatus, unsigned char cParam1, unsigned char cParam2 )
 {
-    if ( !m_bIsOpen ) return false;
-    return midiOutShortMsg( m_hMIDIOut, ( cParam2 << 16 ) + ( cParam1 << 8 ) + cStatus ) == MMSYSERR_NOERROR;
+	DWORD msg = (cParam2 << 16) + (cParam1 << 8) + cStatus;
+
+	if(m_pfnKShortMsg)
+	{
+		return m_pfnKShortMsg(msg) == MMSYSERR_NOERROR;
+	}
+    
+	return midiOutShortMsg( m_hMIDIOut, msg ) == MMSYSERR_NOERROR;
+}
+
+bool MIDIOutDevice::PlayEvent(const MIDIEvent* evt)
+{
+	switch(evt->GetEventType())
+	{
+		case MIDIEvent::EventType::ChannelEvent:
+		{
+			const MIDIChannelEvent* chevt = (const MIDIChannelEvent*)evt;
+			return PlayEvent(chevt->GetEventCode(), chevt->GetParam1(), chevt->GetParam2());
+		}
+
+		case MIDIEvent::EventType::SysExEvent:
+		{
+			if(!m_bIsOpen)
+				return false;
+			
+			const MIDISysExEvent* chevt = (const MIDISysExEvent*)evt;
+			CHAR* data = new CHAR[chevt->GetDataLen() + 1];
+			memcpy(data + 1, chevt->GetData(), chevt->GetDataLen());
+
+			data[0] = chevt->GetEventCode();
+
+			MIDIHDR hdr = {};
+			hdr.lpData = data;
+			hdr.dwBufferLength = chevt->GetDataLen() + 1;
+			hdr.dwBytesRecorded = hdr.dwBufferLength;
+
+			if(m_hmKDM)
+			{
+				if(m_pfnKLongMsg)
+				{
+					hdr.dwFlags = MHDR_PREPARED;
+
+					bool res = (m_pfnKLongMsg(&hdr) == MMSYSERR_NOERROR);
+
+					delete[] data;
+
+					return res;
+				}
+
+				return true;
+			}
+			else
+			{
+				MMRESULT res;
+
+				res = midiOutPrepareHeader(m_hMIDIOut, &hdr, sizeof(hdr));
+				if(res)
+					return false;
+
+				for(;;)
+				{
+					res = midiOutLongMsg(m_hMIDIOut, &hdr, sizeof(hdr));
+					if(res == MIDIERR_NOTREADY)
+						continue;
+
+					if(!res)
+						break;
+
+					return false;
+				}
+
+				for(;;)
+				{
+					res = midiOutUnprepareHeader(m_hMIDIOut, &hdr, sizeof(hdr));
+					if(res == MIDIERR_STILLPLAYING)
+						continue;
+
+					if(!res)
+						break;
+
+					return false;
+				}
+
+				delete[] data;
+				return true;
+			}
+
+			return true;
+		}
+
+		default:
+			return true;
+	}
 }
 
 void CALLBACK MIDIOutDevice::MIDIOutProc( HMIDIOUT hmo, UINT wMsg, DWORD_PTR dwInstance,

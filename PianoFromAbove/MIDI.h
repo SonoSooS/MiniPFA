@@ -299,10 +299,19 @@ protected:
     wstring m_sDevice;
 };
 
+extern "C"
+{
+	typedef MMRESULT(WINAPI*kShortMsg)(DWORD dwMsg);
+	typedef MMRESULT(WINAPI*kLongMsg)(LPMIDIHDR hdr);
+	typedef BOOL(WINAPI*pfnBoolFunc)(void);
+}
+
 class MIDIOutDevice : public MIDIDevice
 {
 public:
-    MIDIOutDevice() : m_hMIDIOut( NULL ) { }
+	static void SetKDMPath(const wstring &path);
+
+    MIDIOutDevice() : m_hMIDIOut( NULL ), m_hmKDM(NULL), m_pfnKShortMsg(NULL), m_pfnKLongMsg(NULL) { }
     virtual ~MIDIOutDevice() { Close(); }
 
     int GetNumDevs() const;
@@ -317,9 +326,16 @@ public:
     bool PlayEventAcrossChannels( unsigned char cStatus, unsigned char cParam1, unsigned char cParam2 );
     bool PlayEventAcrossChannels( unsigned char cStatus, unsigned char cParam1, unsigned char cParam2, const vector< int > &vChannels );
     bool PlayEvent( unsigned char bStatus, unsigned char bParam1, unsigned char bParam2 = 0 );
+	bool PlayEvent(const MIDIEvent* evt);
 
 private:
     static void CALLBACK MIDIOutProc( HMIDIOUT hmo, UINT wMsg, DWORD_PTR dwInstance,
                                       DWORD_PTR dwParam1, DWORD_PTR dwParam2 );
+	static MMRESULT WINAPI KDMShortMsg(HMIDIOUT hmo, DWORD dwMsg);
     HMIDIOUT m_hMIDIOut;
+	HMODULE m_hmKDM;
+	kShortMsg m_pfnKShortMsg;
+	kLongMsg m_pfnKLongMsg;
+	static wstring s_KDMPath;
 };
+

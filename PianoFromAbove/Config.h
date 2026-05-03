@@ -60,6 +60,7 @@ struct AudioSettings : public ISettings
     vector< wstring > vMIDIOutDevices;
     int iOutDevice;
     wstring sDesiredOut;
+	wstring KDMPath;
 };
 
 struct VideoSettings : public ISettings
@@ -212,3 +213,4 @@ private:
     PlaybackSettings m_PlaybackSettings;
     ViewSettings m_ViewSettings;
 };
+
