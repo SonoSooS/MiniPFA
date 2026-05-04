@@ -16,13 +16,15 @@
 
 MIDIPos::MIDIPos( MIDI &midi ) : m_MIDI( midi )
 {
-    // Init file position
-    m_iCurrTick = m_iCurrMicroSec = 0;
-
     // Init track positions
     size_t iTracks = m_MIDI.m_vTracks.size();
-    for ( size_t i = 0; i < iTracks; i++ )
-        m_vTrackPos.push_back( 0 );
+	for(size_t i = 0; i < iTracks; i++)
+	{
+		if(m_MIDI.m_vTracks[i]->m_vEvents.empty())
+			continue;
+
+		m_vTrackPos.push(TrackInfo{i, m_MIDI.m_vTracks[i]->m_vEvents[0]->GetAbsT(), 0});
+	}
 
     // Init SMPTE tempo
     if ( m_MIDI.m_Info.iDivision & 0x8000 )
@@ -45,91 +47,41 @@ MIDIPos::MIDIPos( MIDI &midi ) : m_MIDI( midi )
     }
 }
 
-// Gets the next closest event as long as it occurs before iMicroSecs elapse
-// Always get next event if iMicroSecs is negative
-int MIDIPos::GetNextEvent( int iMicroSecs, MIDIEvent **pOutEvent )
+
+bool MIDIPos::GetNextEvent( MIDIEvent **pOutEvent )
 {
-    if ( !pOutEvent ) return 0;
     *pOutEvent = NULL;
 
-    // Get the next closest event
-    MIDIEvent *pMinEvent = NULL;
-    size_t iMinPos = 0;
-    size_t iTracks = m_vTrackPos.size();
-    for ( size_t i = 0; i < iTracks; i++ )
-    {
-        size_t pos = m_vTrackPos[i];
-        if ( pos < m_MIDI.m_vTracks[i]->m_vEvents.size() &&
-             ( !pMinEvent || m_MIDI.m_vTracks[i]->m_vEvents[pos]->GetAbsT() < pMinEvent->GetAbsT() ) )
-        {
-            pMinEvent = m_MIDI.m_vTracks[i]->m_vEvents[pos];
-            iMinPos = i;
-        }
-    }
+	if(m_vTrackPos.empty())
+		return false;
 
-    // No min found. We're at the end of file
-    if ( !pMinEvent )
-        return 0;
+	MIDIPos::TrackInfo& track_info = m_vTrackPos.top();
 
-    // Make sure the event doesn't occur after the requested time window
-    int iMaxTickAllowed = m_iCurrTick;
-    if ( m_bIsStandard )
-        iMaxTickAllowed += ( static_cast< long long >( m_iTicksPerBeat ) * ( m_iCurrMicroSec + iMicroSecs ) ) / m_iMicroSecsPerBeat;
-    else
-        iMaxTickAllowed += ( static_cast< long long >( m_iTicksPerSecond ) * ( m_iCurrMicroSec + iMicroSecs ) ) / 1000000;
+	auto& v_track = m_MIDI.m_vTracks[track_info.TrackID];
+	auto& v_events = v_track->m_vEvents;
 
-    if ( iMicroSecs < 0 || pMinEvent->GetAbsT() <= iMaxTickAllowed )
-    {
-        // How many micro seconds did we just process?
-        *pOutEvent = pMinEvent;
-        int iSpan = pMinEvent->GetAbsT() - m_iCurrTick;
-        if ( m_bIsStandard )
-            iSpan = ( static_cast< long long >( m_iMicroSecsPerBeat ) * iSpan ) / m_iTicksPerBeat - m_iCurrMicroSec;
-        else
-            iSpan = ( 1000000LL * iSpan ) / m_iTicksPerSecond - m_iCurrMicroSec;
-        m_iCurrTick = pMinEvent->GetAbsT();
-        m_iCurrMicroSec = 0;
-        m_vTrackPos[iMinPos]++;
+	MIDIEvent* pEvent = v_events[track_info.EventIndex];
 
-        // Change the tempo going forward if we're at a SetTempo event
-        if ( pMinEvent->GetEventType() == MIDIEvent::MetaEvent )
-        {
-            MIDIMetaEvent *pMetaEvent = reinterpret_cast< MIDIMetaEvent* >( pMinEvent );
-            if ( pMetaEvent->GetMetaEventType() == MIDIMetaEvent::SetTempo && pMetaEvent->GetDataLen() == 3 )
-                MIDI::Parse24Bit ( pMetaEvent->GetData(), 3, &m_iMicroSecsPerBeat );
-        }
+	size_t new_index = ++track_info.EventIndex;
+	if(new_index < v_events.size())
+	{
+		int new_absT = v_events[new_index]->GetAbsT();
+		if(new_absT != track_info.AbsT)
+		{
+			MIDIPos::TrackInfo new_info = track_info;
+			new_info.AbsT = new_absT;
+			// I hate this
+			m_vTrackPos.pop();
+			m_vTrackPos.push(new_info);
+		}
+	}
+	else
+	{
+		m_vTrackPos.pop();
+	}
 
-        return iSpan;
-    }
-    // No events to be found, but haven't hit end of file
-    else
-    {
-        if ( m_bIsStandard )
-            m_iCurrMicroSec = iMicroSecs + m_iCurrMicroSec -
-                              ( static_cast< long long >( m_iMicroSecsPerBeat ) * ( iMaxTickAllowed - m_iCurrTick ) ) / m_iTicksPerBeat;
-        else
-            m_iCurrMicroSec = iMicroSecs + m_iCurrMicroSec -
-                              ( 1000000LL * ( iMaxTickAllowed - m_iCurrTick ) ) / m_iTicksPerSecond;
-        m_iCurrTick = iMaxTickAllowed;
-        return iMicroSecs;
-    }
-}
-
-int MIDIPos::GetNextEvents( int iMicroSecs, vector< MIDIEvent* > &vEvents )
-{
-    MIDIEvent *pEvent = NULL;
-    int iTotal = 0;
-    do
-    {
-        if ( iMicroSecs >= 0 )
-            iTotal += GetNextEvent( iMicroSecs - iTotal, &pEvent );
-        else
-            iTotal += GetNextEvent( iMicroSecs, &pEvent );
-        if ( pEvent ) vEvents.push_back( pEvent );
-    }
-    while ( pEvent );
-
-    return iTotal;
+    *pOutEvent = pEvent;
+    return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -138,6 +90,8 @@ int MIDIPos::GetNextEvents( int iMicroSecs, vector< MIDIEvent* > &vEvents )
 
 MIDI::MIDI ( const wstring &sFilename )
 {
+	InitArrays();
+
     // Open the file
     ifstream ifs( sFilename, ios::in | ios::binary | ios::ate );
     if ( !ifs.is_open() )
@@ -197,21 +151,18 @@ const wstring MIDI::Instruments[129] =
 
 const wstring &MIDI::NoteName( int iNote )
 {
-    InitArrays();
     if ( iNote < 0 || iNote >= MIDI::KEYS ) return aNoteNames[MIDI::KEYS];
     return aNoteNames[iNote];
 }
 
 MIDI::Note MIDI::NoteVal( int iNote )
 {
-    InitArrays();
     if ( iNote < 0 || iNote >= MIDI::KEYS ) return C;
     return aNoteVal[iNote];
 }
 
 bool MIDI::IsSharp( int iNote )
 {
-    InitArrays();
     if ( iNote < 0 || iNote >= MIDI::KEYS ) return false;
     return aIsSharp[iNote];
 }
@@ -219,7 +170,6 @@ bool MIDI::IsSharp( int iNote )
 // Number of white keys in [iMinNote, iMaxNote)
 int MIDI::WhiteCount( int iMinNote, int iMaxNote )
 {
-    InitArrays();
     if ( iMinNote < 0 || iMinNote >= MIDI::KEYS || iMaxNote < 0 || iMaxNote >= MIDI::KEYS ) return false;
     return aWhiteCount[iMaxNote] - aWhiteCount[iMinNote];
 }
@@ -403,7 +353,8 @@ void MIDI::PostProcess( vector< MIDIEvent* > *vEvents )
     MIDIEvent *pEvent = NULL;
     long long llFirstNote = -1;
     long long llTime = 0;
-    for ( midiPos.GetNextEvent( -1, &pEvent ); pEvent; midiPos.GetNextEvent( -1, &pEvent ) )
+
+    while(midiPos.GetNextEvent(&pEvent))
     {
         // Compute the exact time (off by at most a micro second... I don't feel like rounding)
         int iTick = pEvent->GetAbsT();
@@ -432,12 +383,10 @@ void MIDI::PostProcess( vector< MIDIEvent* > *vEvents )
         }
         else if ( pEvent->GetEventType() == MIDIEvent::MetaEvent )
         {
-            MIDIMetaEvent *pMetaEvent = reinterpret_cast< MIDIMetaEvent* >( pEvent );
-            if ( pMetaEvent->GetMetaEventType() == MIDIMetaEvent::SetTempo )
+			MIDIMetaEvent *pMetaEvent = reinterpret_cast< MIDIMetaEvent* >( pEvent );
+            if ( pMetaEvent->GetMetaEventType() == MIDIMetaEvent::SetTempo && pMetaEvent->GetDataLen() == 3)
             {
-                iTicksPerBeat = midiPos.GetTicksPerBeat();
-                iTicksPerSecond = midiPos.GetTicksPerSecond();
-                iMicroSecsPerBeat = midiPos.GetMicroSecsPerBeat();
+				MIDI::Parse24Bit(pMetaEvent->GetData(), 3, &iMicroSecsPerBeat);
                 iLastTempoTick = iTick;
                 llLastTempoTime = llTime;
             }

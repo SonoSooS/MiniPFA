@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 #include <vector>
+#include <queue>
 #include <string>
 using namespace std;
 
@@ -37,8 +38,7 @@ class MIDIPos
 public:
     MIDIPos( MIDI &midi );
 
-    int GetNextEvent( int iMicroSecs, MIDIEvent **pEvent );
-    int GetNextEvents( int iMicroSecs, vector< MIDIEvent* > &vEvents );
+    bool GetNextEvent( MIDIEvent **pEvent );
 
     bool IsStandard() const { return m_bIsStandard; }
     int GetTicksPerBeat() const { return m_iTicksPerBeat; }
@@ -46,24 +46,43 @@ public:
     int GetMicroSecsPerBeat() const { return m_iMicroSecsPerBeat; }
 
 private:
+	struct TrackInfo
+	{
+		unsigned long TrackID;
+		int AbsT;
+		mutable size_t EventIndex;
+
+		// Wrong order on purpose, stupid priority_queue
+		bool operator< (const TrackInfo& other) const
+		{
+			int diff2 = other.AbsT - AbsT;
+			if(diff2)
+				return diff2 < 0;
+
+			long diff1 = other.TrackID - TrackID;
+			if(diff1)
+				return diff1 < 0;
+
+			return false;
+		}
+	};
+
     // Where are we in the file?
     MIDI &m_MIDI;
-    vector< size_t > m_vTrackPos;
+    priority_queue<TrackInfo> m_vTrackPos;
 
     // Tempo variables
     bool m_bIsStandard;
     int m_iTicksPerBeat, m_iMicroSecsPerBeat; // For standard division
     int m_iTicksPerSecond; // For SMPTE division
-
-    // Position variables
-    int m_iCurrTick;
-    int m_iCurrMicroSec;
 };
 
 //Holds MIDI data
 class MIDI
 {
 public:
+	static void InitArrays();
+
     enum Note { A, AS, B, C, CS, D, DS, E, F, FS, G, GS };
 
     static const int KEYS = 129; // One extra because 128th is a sharp
@@ -123,7 +142,6 @@ public:
     const vector< MIDITrack* >& GetTracks() const { return m_vTracks; }
 
 private:
-    static void InitArrays();
     static wstring aNoteNames[KEYS + 1];
     static Note aNoteVal[KEYS];
     static bool aIsSharp[KEYS];

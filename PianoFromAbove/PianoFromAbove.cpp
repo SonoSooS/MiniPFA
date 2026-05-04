@@ -53,6 +53,8 @@ INT WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpszCmdL
     g_hInstance = hInstance;
     srand( ( unsigned )time( NULL ) );
 
+	MIDI::InitArrays();
+
     // Ensure that the common control DLL is loaded. 
     INITCOMMONCONTROLSEX icex;
     icex.dwSize = sizeof( INITCOMMONCONTROLSEX );
