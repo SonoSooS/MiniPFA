@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 #include <map>
+#include <unordered_map>
 #include <string>
 using namespace std;
 
@@ -221,7 +222,7 @@ private:
     void RenderGlobals();
     void RenderLines();
     void RenderNotes();
-    void RenderNote( int iPos );
+	void RenderNote(const MIDIChannelEvent *pNote);
     float GetNoteX( int iNote );
     void RenderKeys();
     void RenderBorder();
@@ -253,7 +254,8 @@ private:
     int m_iStartPos, m_iEndPos; // Postions of the start and end events that occur in the current window
     long long m_llStartTime, m_llTimeSpan;  // Times of the start and end events of the current window
     int m_iStartTick; // Tick that corresponds with m_llStartTime. Used to help with beat and metronome detection
-    vector< int > m_vState;  // The notes that are on at time m_llStartTime.
+    map<int,MIDIChannelEvent*> m_vState[128];  // The notes that are on at time m_llStartTime.
+	unordered_map<MIDIChannelEvent*,int> m_vStateMapping[128];
     int m_pNoteState[128]; // The last note that was turned on
     double m_dSpeed; // Speed multiplier
     bool m_bPaused; // Paused state
@@ -302,5 +304,6 @@ private:
     float m_fNotesX, m_fNotesY, m_fNotesCX, m_fNotesCY; // Notes position
     int m_iAllWhiteKeys; // Number of white keys are on the screen
     float m_fWhiteCX; // Width of the white keys
+	float m_fDeflate;
     long long m_llRndStartTime; // Rounded start time to make stuff drop at the same time
 };

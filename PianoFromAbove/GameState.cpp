@@ -512,7 +512,7 @@ MainScreen::MainScreen( wstring sMIDIFile, State eGameMode, HWND hWnd, Renderer 
 
     // Allocate
     m_vTrackSettings.resize( m_MIDI.GetInfo().iNumTracks );
-    m_vState.reserve( 128 );
+    //m_vState.reserve( 128 );
 
     // Initialize
     InitNoteMap( vEvents ); // Longish
@@ -1048,7 +1048,9 @@ void MainScreen::UpdateState( int iPos )
 {
     // Event data
     MIDIChannelEvent *pEvent = m_vEvents[iPos];
-    if ( !pEvent->GetSister() ) return;
+	MIDIChannelEvent *pSister = pEvent->GetSister();
+    if(!pSister)
+		return;
 
     MIDIChannelEvent::ChannelEventType eEventType = pEvent->GetChannelEventType();
     int iTrack = pEvent->GetTrack();
@@ -1056,59 +1058,32 @@ void MainScreen::UpdateState( int iPos )
     int iNote = pEvent->GetParam1();
     int iVelocity = pEvent->GetParam2();
 
+	auto& note_state = m_vState[iNote];
+	auto& note_mapping = m_vStateMapping[iNote];
+
     // Turn note on
     if ( eEventType == MIDIChannelEvent::NoteOn && iVelocity > 0 )
     {
-        m_vState.push_back( iPos );
-        m_pNoteState[iNote] = iPos;
+		note_state[iPos] = pEvent;
+		note_mapping[pEvent] = iPos;
     }
     else
     {
-        // Pre-erase note state
-        m_pNoteState[iNote] = -1;
-        
-        MIDIChannelEvent *pSearch = pEvent->GetSister();
-        // linear search and erase. No biggie given N is number of simultaneous notes being played
-        vector<int>::reverse_iterator it = m_vState.rbegin();
-        while ( it != m_vState.rend() )
-        {
-			int iEvent = *it;
-			MIDIChannelEvent* pSearchEvent = m_vEvents[iEvent];
+		auto itParentPos = note_mapping.find(pSister);
+		if(itParentPos == note_mapping.end())
+		{
+			__debugbreak();
+			return;
+		}
+		
+		int iParentPos = (*itParentPos).second;
+		note_mapping.erase(itParentPos);
 
-            if ( pSearchEvent == pSearch )
-			{
-                // if only reverse_iterator could do this...
-                //it = m_vState.erase( it );
-
-				// Absolutely disgusting
-				{
-					auto del_it = (it + 1);
-					auto res_it = m_vState.erase(del_it.base());
-					it = vector<int>::reverse_iterator((res_it));
-				}
-                
-                // Break out if there is already a note found to replace this one
-				if(m_pNoteState[iNote] != -1)
-					break;
-				
-                // Do not find anything anymore
-				pSearch = nullptr;
-			}
-            else
-            {
-				if(pSearchEvent->GetParam1() == iNote)
-				{
-                    // Find top-most note as the active one
-					m_pNoteState[iNote] = iEvent;
-                    
-                    // Nothing to find anymore, break out
-					if(!pSearch)
-						break;
-				}
-                
-				++it;
-            }
-        }
+		auto found = note_state.find(iParentPos);
+		if(found == note_state.end())
+			__debugbreak();
+		else
+			note_state.erase(found);
     }
 }
 
@@ -1181,7 +1156,12 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
         m_iStartPos = itNonNote->second;
 
     // Find the notes that occur simultaneously with the previous note on
-    m_vState.clear();
+	for(int i = 0; i < 128; i++)
+	{
+		m_vState[i].clear();
+		m_vStateMapping[i].clear();
+	}
+    
     memset( m_pNoteState, -1, sizeof( m_pNoteState ) );
     if ( itMiddle != itBegin )
     {
@@ -1190,18 +1170,22 @@ void MainScreen::JumpTo( long long llStartTime, bool bUpdateGUI, bool bInitLearn
         int iSimultaneous = m_vEvents[itPrev->second]->GetSimultaneous() + 1;
         for ( eventvec_t::reverse_iterator it( itMiddle ); iFound < iSimultaneous && it != m_vNoteOns.rend(); ++it )
         {
-            MIDIChannelEvent *pEvent = m_vEvents[ it->second ];
+			int iPos = it->second;
+            MIDIChannelEvent *pEvent = m_vEvents[ iPos ];
             MIDIChannelEvent *pSister = pEvent->GetSister();
-            if ( pSister->GetAbsMicroSec() > itPrev->first ) // > because itMiddle is the max for its time
-                iFound++;
+			if(pSister->GetAbsMicroSec() > itPrev->first) // > because itMiddle is the max for its time
+			{
+				iFound++;
+			}
             if ( pSister->GetAbsMicroSec() > llStartTime ) // > because we don't care about simultaneous ending notes
             {
-                m_vState.push_back( it->second );
-                if ( m_pNoteState[pEvent->GetParam1()] < 0 )
-                    m_pNoteState[pEvent->GetParam1()] = it->second;
+				unsigned char iNote = pEvent->GetParam1();
+				//TODO: verify
+                m_vState[iNote][iPos] = pEvent;
+				m_vStateMapping[iNote][pEvent] = iPos;
             }
         }
-        reverse( m_vState.begin(), m_vState.end() );
+        //reverse( m_vState.begin(), m_vState.end() );
     }
 
     // End position: a little tricky. Same as logic code. Only needed for paused jumping.
@@ -1513,6 +1497,11 @@ void MainScreen::RenderGlobals()
                     ( MIDI::IsSharp( m_iEndNote ) ? SharpRatio / 2.0f : 0.0f );
     m_fWhiteCX = m_fNotesCX / ( m_iAllWhiteKeys + fBuffer );
 
+	float fDeflate = m_fWhiteCX * 0.15f / 2.0f;
+	fDeflate = floor(fDeflate + 0.5f);
+	fDeflate = max(min(fDeflate, 3.0f), 1.0f);
+	m_fDeflate = fDeflate;
+
     // Screen Y info
     m_fNotesY = m_fOffsetY + m_fTempOffsetY;
     if ( !m_bShowKB )
@@ -1620,47 +1609,65 @@ void MainScreen::RenderNotes()
         return;
 
     // Render notes. Regular notes then sharps to  make sure they're not hidden
-    bool bHasSharp = false;
-    for ( vector< int >::iterator it = m_vState.begin(); it != m_vState.end(); ++it )
-        if ( !MIDI::IsSharp( m_vEvents[*it]->GetParam1() ) )
-            RenderNote( *it );
-        else
-            bHasSharp = true;
+	for(unsigned iSharp = 0; iSharp < 2; iSharp++)
+	{
+		for(unsigned iKey = 0; iKey < 128; iKey++)
+		{
+			if(iSharp != MIDI::IsSharp(iKey))
+				continue;
 
-    for ( int i = m_iStartPos; i <= m_iEndPos; i++ )
-    {
-        MIDIChannelEvent *pEvent = m_vEvents[i];
-        if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn &&
-             pEvent->GetParam2() > 0 && pEvent->GetSister() )
-        {
-            if ( !MIDI::IsSharp( pEvent->GetParam1() ) )
-                RenderNote( i );
-            else
-                bHasSharp = true;
-        }
-    }
+			int kState = -1;
+
+			for(auto it = m_vState[iKey].begin(); it != m_vState[iKey].end(); ++it)
+			{
+				MIDIChannelEvent *pEvent = (*it).second;
+				RenderNote(pEvent);
+				kState = (*it).first;
+			}
+
+			m_pNoteState[iKey] = kState;
+		}
+	}
+
+	int iHasSharp = false;
+
+	for(int i = m_iStartPos; i <= m_iEndPos; i++)
+	{
+		MIDIChannelEvent *pEvent = m_vEvents[i];
+		if(pEvent->GetSister() && pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn &&
+		   pEvent->GetParam2() > 0)
+		{
+			if(!MIDI::IsSharp(pEvent->GetParam1()))
+				RenderNote(pEvent);
+			else
+				++iHasSharp;
+		}
+	}
 
     // Do it all again, but only for the sharps
-    if ( bHasSharp )
-    {
-        for ( vector< int >::iterator it = m_vState.begin(); it != m_vState.end(); ++it )
-            if ( MIDI::IsSharp( m_vEvents[*it]->GetParam1() ) )
-                RenderNote( *it );
+	if(iHasSharp)
+	{
+		for(int i = m_iStartPos; i <= m_iEndPos; i++)
+		{
+			MIDIChannelEvent *pEvent = m_vEvents[i];
+			if(pEvent->GetSister() && pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn &&
+			   pEvent->GetParam2() > 0)
+			{
+				if(MIDI::IsSharp(pEvent->GetParam1()))
+				{
+					RenderNote(pEvent);
+					if(--iHasSharp)
+						continue;
 
-        for ( int i = m_iStartPos; i <= m_iEndPos; i++ )
-        {
-            MIDIChannelEvent *pEvent = m_vEvents[i];
-            if ( pEvent->GetChannelEventType() == MIDIChannelEvent::NoteOn &&
-                 pEvent->GetParam2() > 0 && pEvent->GetSister() &&
-                 MIDI::IsSharp( pEvent->GetParam1() ) )
-                RenderNote( i );                
-        }
-    }
+					break;
+				}
+			}
+		}
+	}
 }
 
-void MainScreen::RenderNote( int iPos )
+void MainScreen::RenderNote(const MIDIChannelEvent *pNote)
 {
-    const MIDIChannelEvent *pNote = m_vEvents[iPos];
     int iNote = pNote->GetParam1();
     int iTrack = pNote->GetTrack();
     int iChannel = pNote->GetChannel();
@@ -1675,13 +1682,11 @@ void MainScreen::RenderNote( int iPos )
     float y = m_fNotesY + m_fNotesCY * ( 1.0f - static_cast< float >( llNoteStart - m_llRndStartTime ) / m_llTimeSpan );
     float cx =  MIDI::IsSharp( iNote ) ? m_fWhiteCX * SharpRatio : m_fWhiteCX;
     float cy = m_fNotesCY * ( static_cast< float >( llNoteEnd - llNoteStart ) / m_llTimeSpan );
-    float fDeflate = m_fWhiteCX * 0.15f / 2.0f;
+    float fDeflate = m_fDeflate;
 
     // Rounding to make everything consistent
     cy = floor( cy + 0.5f ); // constant cy across rendering
     y = floor( y + 0.5f );
-    fDeflate = floor( fDeflate + 0.5f );
-    fDeflate = max( min( fDeflate, 3.0f ), 1.0f );
 
     // Clipping :/
     float fMinY = m_fNotesY - 5.0f;
